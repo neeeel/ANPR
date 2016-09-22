@@ -119,8 +119,8 @@ def save_Job(data):
         if messagebox.askyesno(message="This job already exists, do you want to overwrite it?"):
             print("phoo")
             jobID = row[0]
-            sites = cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall()
-            for site in sites:
+
+            for site in cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall():
                 siteID = site[0]
                 cur.execute('''DELETE from movement where siteid = ? ''',(siteID,))
             cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
@@ -137,7 +137,9 @@ def save_Job(data):
     #result= cur.execute('''SELECT  ID from job where name = ? ''', (job["jobname"],))
     jobID = cur.lastrowid
     print("inserted new job, id is ",jobID)
+    print("site data to be inserted is",sites)
     for site in sites:
+        print("looking to add to database, site",site)
         siteNo = site[0]
         combined = int(site[1])
         original=int(site[2])
@@ -215,7 +217,7 @@ def load_job(jobNo,jobName,jobDate):
         site = sites.get(siteNo,{})
         print("after searching, site is",site)
         mvmt = site.get(movement,{"newmovement":movement,"originalmovements":[]})
-        print("mvmt is2",mvmt)
+        print("mvmt is",mvmt)
         mvmt["originalmovements"].append(original)
         mvmt["dir"] = dir
         site[movement]=mvmt
@@ -223,13 +225,13 @@ def load_job(jobNo,jobName,jobDate):
         sites[siteNo] = site
     result = cur.execute("SELECT id FROM site WHERE jobNo = ?",(job["id"],)).fetchall()
     for r in result:
-        print("checking site with id",r[0])
+        #print("checking site with id",r[0])
         for c in cur.execute("SELECT comment,combinedmovementnum from movement WHERE siteId = ?  group by combinedmovementnum",(r[0],)).fetchall():
-            print("comment is",c[0])
+            #print("comment is",c[0])
             comments.append(c[0])
-    print("comments are",comments)
+    #print("comments are",comments)
     job["comments"] =comments
-    print("sites are",sites)
+    #print("sites are",sites)
     job["sites"] = sites
     return job
 

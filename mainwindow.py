@@ -23,14 +23,19 @@ class mainWindow(tkinter.Tk):
         self.colourLabels = []
         self.entryValues = []
         self.revertButton = None
+        self.siteLabel = None
         self.box1Value = 0
         self.box2Value = 0 ### to keep track of the combo boxes on the comparison display sheet
         self.selectedDuplicates = None
+        self.getRouteAssignmentFsLsNonDirectionalFunction = None
         self.loadUnclassedFunction = None
         self.loadClassedFunction = None
         self.loadJobFunction = None
+        self.getNonDirectionalCordonFunction = None
         self.reprocessDataFunction = None
         self.setDuplicatesFunction = None
+        self.getCordonFunction = None
+        self.getRouteAssignmentFsLsFunction = None
         self.displayWin = None
         self.currentSelected = [0,0]
         self.loadOVCountsFunction = None
@@ -72,9 +77,198 @@ class mainWindow(tkinter.Tk):
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
         self.load_settings()
-        #self.spawn_summary_window()
+        #self.spawn_cordon_screen()
         self.spawn_survey_setup_screen()
         #self.spawn_duplicates_window(None)
+
+    def get_cordon_data(self):
+        data = self.getCordonFunction(self.currentJob)
+        self.draw_cordon_matrix(self.matrixCanvas,data)
+
+    def spawn_cordon_screen(self):
+        for child in self.winfo_children():
+            child.destroy()
+
+        frame = tkinter.Frame(self, bg="white")
+        tkinter.Button(frame, text="In/Out Only", bg="white", height=3,width=12,
+                       command=self.get_directional_cordon_data).grid(row=0, column=0, padx=10, pady=10)
+        tkinter.Button(frame, text="Non Directional", bg="white", height=3,width=12,
+                       command=self.get_nondirectional_cordon_data).grid(row=1, column=0, padx=10, pady=10)
+        tkinter.Button(frame, text="Netest", bg="white", height=3, width=12,
+                       command=self.get_directional_route_assignment_fs_ls_data).grid(row=2, column=0, padx=10, pady=10)
+        tkinter.Button(frame, text="test 2", bg="white", height=3, width=12,
+                       command=self.get_non_directional_route_assignment_fs_ls_data).grid(row=3, column=0, padx=10, pady=10)
+        frame.grid(row=0,column=0, padx=20, pady=10,sticky="w")
+        frame = tkinter.Frame(self, bg="white",relief=tkinter.GROOVE,borderwidth=3,width=800,height=800)
+        frame.grid(row=0, column=1, padx=10, pady=10)
+        self.matrixCanvas = tkinter.Canvas(frame,bg="white",width=800,height=800)
+        self.matrixCanvas.grid(row=0,column=0)
+        self.get_directional_cordon_data()
+
+    def spawn_duration_matrix_screen(self):
+        pass
+
+    def get_non_directional_route_assignment_fs_ls_data(self):
+        inMov = []
+        outMov = []
+        data = self.getRouteAssignmentFsLsNonDirectionalFunction(self.currentJob)
+        for item in data[0]:
+            i, o = item[0]
+            if i not in inMov:
+                inMov.append(i)
+            if o not in outMov:
+                outMov.append(o)
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        self.draw_matrix(data, inMov, outMov)
+
+    def get_directional_route_assignment_fs_ls_data(self):
+        inMov = []
+        outMov = []
+        data = self.getRouteAssignmentFsLsFunction(self.currentJob)
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if mvmt["dir"] == 1:
+                    inMov.append(mvmt["newmovement"])
+                if mvmt["dir"] == 2:
+                    outMov.append(mvmt["newmovement"])
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        self.draw_matrix(data, inMov, outMov)
+
+    def get_nondirectional_cordon_data(self):
+        inMov=[]
+        outMov=[]
+        data = self.getNonDirectionalCordonFunction(self.currentJob)
+        for item in data[0]:
+            i, o = item[0]
+            if i not in inMov:
+                inMov.append(i)
+            if o not in outMov:
+                outMov.append(o)
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        self.draw_matrix(data,inMov,outMov)
+
+    def get_directional_cordon_data(self):
+        inMov = []
+        outMov = []
+        data = self.getCordonFunction(self.currentJob)
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if mvmt["dir"] == 1:
+                    inMov.append(mvmt["newmovement"])
+                if mvmt["dir"] == 2:
+                    outMov.append(mvmt["newmovement"])
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        self.draw_matrix(data,inMov,outMov)
+
+    def draw_matrix(self,data,inMov,outMov):
+        ###
+        ### data is in the form of a list [cell data,in Totals,out Totals]
+        ### cell data is a list of lists, each item is of the form [(inmov,outmov),value]
+        ### in Totals and out Totals are the final row and column totals to display in the matrix
+        ###
+        canvas = self.matrixCanvas
+        maxColWidth = 50
+        maxRowHeight = 30
+        maxFontSize = 8
+        columnWidth = 50
+        rowHeight = 30
+        fontsize = 8
+        print("inmov is",inMov)
+        noOfCols = len(outMov)
+        noOfRows = len(inMov)
+        if noOfCols >32 or noOfRows > 32:
+            columnWidth =30
+            rowHeight = 17
+            fontsize=6
+        x, y = 10, 10
+        f = tkinter.font.Font(family="helvetica", size=fontsize)
+        titleFont = tkinter.font.Font(family="helvetica", size=12, weight="bold")
+        self.matrixCanvas.delete(tkinter.ALL)
+        canvasHeight = noOfRows * rowHeight
+        canvasWidth = noOfCols * columnWidth
+        print("canvas specs are", self.matrixCanvas.winfo_width(), self.matrixCanvas.winfo_height())
+        pad = (self.winfo_height() - (canvasHeight + (3 * (rowHeight + 10)))) / 2
+        print("pad is", pad)
+        parent = canvas.winfo_parent()
+        parent = canvas.nametowidget(parent)
+        # parent.grid_configure(pady=pad)
+        canvas.configure(width=canvasWidth + (3 * (columnWidth + 10)), height=canvasHeight + (3 * (rowHeight + 10)))
+        canvas.create_text(x, (canvasHeight + (3 * rowHeight) + 10) / 2, text="IN", font=titleFont)
+        x += columnWidth
+        y += rowHeight + 10
+        ###
+        ### draw lines and text for rows on grid
+        ###
+        for mov in inMov:
+            canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
+            y = y + rowHeight / 2
+            canvas.create_text(x - columnWidth / 2, y, text=mov, font=f)
+            y = y + rowHeight / 2
+        canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
+        y = y + rowHeight / 2
+        canvas.create_text(x - columnWidth / 2, y, text="Total", font=f)
+        y = y + rowHeight / 2
+        canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
+
+        ###
+        ### draw lines and text for columns on grid
+        ###
+        x, y = 10, 10
+        canvas.create_text((canvasWidth + (3 * columnWidth)) / 2, y, text="OUT", font=titleFont)
+        x += columnWidth
+        y += rowHeight + 10
+        for mov in outMov:
+            canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
+            x = x + columnWidth / 2
+            canvas.create_text(x, y - rowHeight / 2, text=mov, font=f)
+            x = x + columnWidth / 2
+        canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
+        x = x + columnWidth / 2
+        canvas.create_text(x, y - rowHeight / 2, text="Total", font=f)
+        x = x + columnWidth / 2
+        canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
+
+        ###
+        ### display data
+        ###
+        dataFont = tkinter.font.Font(family="verdana", size=fontsize)
+        totalFont = tkinter.font.Font(family="verdana", size=fontsize)
+        x, y = 10 + (2 * columnWidth), 10 + rowHeight + 10
+        for item in data[0]:
+            i, o = item[0]
+            count = item[1]
+            try:
+                row = inMov.index(i) + 1
+            except ValueError as e:
+                print("error in ", item)
+                continue
+            try:
+                column = outMov.index(o)
+            except ValueError as e:
+                print("error in ", item)
+                continue
+            canvas.create_text((x + (columnWidth * column) - columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
+                               text=count, font=dataFont)
+
+        column, row = noOfCols, 1
+        for value in data[1]:
+            canvas.create_text((x + (columnWidth * column) - columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
+                               text=int(value), font=totalFont, fill="red")
+            row += 1
+
+        column, row = 0, noOfRows + 1
+        for value in data[2]:
+            canvas.create_text((x + (columnWidth * column) - columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
+                               text=int(value), font=totalFont, fill="red")
+            column += 1
+        column, row = noOfCols, noOfRows + 1
+        canvas.create_text((x + (columnWidth * column) - columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
+                           text=int(sum(data[1])), font=totalFont, fill="blue")
+        print("sum of data columns is", sum(data[1]), sum(data[2]))
 
     def spawn_survey_setup_screen(self):
         self.joblist = myDB.get_jobs()
@@ -108,18 +302,18 @@ class mainWindow(tkinter.Tk):
         self.tree = ttk.Treeview(frame,columns=tuple(range(len(cols))),show="headings",height = 30)
         self.tree.bind("<Double-Button-1>", self.load_job)
         self.tree.heading(0,text="WERW")
-        self.tree.tag_configure("grn",foreground="green")
+        self.tree.tag_configure("grn",foreground="dark blue")
         for i,col in enumerate(cols):
             self.tree.heading(i,text=col)
             self.tree.column(i,width  = 120,anchor=tkinter.CENTER)
-
         for i in range(2):
             self.tree.column(i,width=150)
         #tree.column(3)
             self.tree.grid(row=0,column=0)
             self.tree.tag_configure("tree",font="courier 8")
         for job in self.joblist:
-            self.tree.insert("","end",values =job,tags=("tree"))
+            self.tree.insert("","end",values =job,tags=("tree","grn"))
+
 
         frame.grid(row=1, column=0,padx=(120,0))
 
@@ -254,6 +448,8 @@ class mainWindow(tkinter.Tk):
         outerFrame.grid(row=0, column=2, pady=(10, 0),padx=10)
 
     def edit_job(self):
+        if self.tree.selection() == "":
+            return
         jobname = self.tree.item(self.tree.selection()[0])
         print("selected job", jobname["values"])
         self.currentJob = myDB.load_job(jobname["values"][0], jobname["values"][1], jobname["values"][2])
@@ -261,7 +457,7 @@ class mainWindow(tkinter.Tk):
         job = self.currentJob
         self.entryValues[0].set(job["jobno"])
         self.entryValues[1].set(job["jobname"])
-        self.entryValues[2].set(job["surveydate"])
+        self.entryValues[2].set(datetime.datetime.strftime(job["surveydate"], "%d/%m/%y"))
 
         t =job["timeperiod1"]
         self.entryValues[3].set(t.split("-")[0])
@@ -286,6 +482,7 @@ class mainWindow(tkinter.Tk):
         self.update_movement_window()
         sites = job["sites"]
         print("sites are ",sites)
+        print("no of entry values is",len(self.entryValues))
         if len(self.entryValues) > 33:
             print("no of entry values is", len(self.entryValues))
             count = 1
@@ -492,13 +689,14 @@ class mainWindow(tkinter.Tk):
             count = 1
             for i in range(0,len(self.entryValues[33:]),4):
                 if self.entryValues[33 +i+2].get() != "":
+                    if self.entryValues[33 + i+3].get()==0:
+                        messagebox.showinfo(message="For site " + self.entryValues[33+i].get() + " movement " + str(count) + " you havent selected a direction")
+                        return
                     l =[self.entryValues[33+i].get(),self.entryValues[33 +i+2].get(),count,self.entryValues[33 + i+3].get(),self.entryValues[33 +i+1].get()] # [Site no, new movement no, old movement no, dir,cam]
                     data["sites"].append(l)
                 count+=1
 
-        ###
-        ### TODO: verification of site data
-        ###
+
 
         ###
         ### prompt the user to select the location for storing any files and data produced by the software
@@ -523,7 +721,8 @@ class mainWindow(tkinter.Tk):
         ### delete any previous stored entryValues
         ###
 
-        if self.numCams >0 and len(self.entryValues)>0:
+        print("no of existing entryvalues is",len(self.entryValues))
+        if self.numCams >0 and len(self.entryValues)>33:
             for i in range(self.numCams  * 8): ## 4 variables, 2 rows, for each cam
                 del self.entryValues[-1]
 
@@ -572,7 +771,15 @@ class mainWindow(tkinter.Tk):
         self.summaryTree.column(i,width=500)
         self.summaryTree.grid(row=1,column=0,padx = 100,pady=30)
         self.summaryTree.bind("<Double-Button-1>",self.comment_clicked)
+        self.summaryTree.bind("<Button-3>", self.movement_selected_via_summary)
         self.update_summary_screen()
+
+    def movement_selected_via_summary(self,event):
+        curItem = event.widget.identify_row(event.y)
+        movement = self.summaryTree.item(curItem)["values"][0]
+        movementList = self.movementBox.cget("values")
+        self.movementBox.current(movementList.index("Movement " + str(movement)))
+        self.movementBox.event_generate("<<ComboboxSelected>>", when="tail")
 
     def summary_window_closed(self,win):
         self.summaryTree = None
@@ -587,11 +794,14 @@ class mainWindow(tkinter.Tk):
         for child in self.winfo_children():
             child.destroy()
         self.colourLabels = []
+        self.summaryTree = None
+        self.img = ImageTk.PhotoImage(Image.open("folder-icon.jpg").resize((30,30),Image.ANTIALIAS))
 
         frame = tkinter.Frame(self, bg="white")
         f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
         d = datetime.datetime.strftime(self.currentJob["surveydate"],"%d/%m/%y")
         tkinter.Label(frame, text=self.currentJob["jobno"] + " " + self.currentJob["jobname"]+ " " + d , bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=0, column=2,columnspan = 10,ipadx =30,pady = (10,30))
+        tkinter.Button(frame,image=self.img).grid(row=0,column=14,padx=10,pady = (10,30))
         tkinter.Label(frame,text = "Overviews", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=1,column = 0,ipadx =30)
         tkinter.Button(frame, text="Create Overview \nCount Template", width=17, bg="white", height=3,
                        command=self.export_OVTemplate).grid(row=2, column=0, padx=20, pady=20)
@@ -611,7 +821,7 @@ class mainWindow(tkinter.Tk):
                                                                                                padx=20, pady=20)
 
         tkinter.Label(frame, text="Matching", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=7, column=0,ipadx =30)
-        tkinter.Button(frame, text="Movement To\nMovement", width=17, height=3, bg="white").grid(row=8, column=0,
+        tkinter.Button(frame, text="Open/Closed\nCordon", width=17, height=3, bg="white",command=self.spawn_cordon_screen).grid(row=8, column=0,
                                                                                            padx=20, pady=20)
         tkinter.Button(frame, text="First/Last Seen", width=17, height=3, bg="white").grid(row=8, column=1,
                                                                                                      padx=20, pady=20)
@@ -756,7 +966,7 @@ class mainWindow(tkinter.Tk):
         frame = tkinter.Frame(win,bg ="white", width=self.winfo_screenwidth(), height=self.winfo_screenheight())
         frame.columnconfigure(0,weight = 1)
         tkinter.Label(frame,text="Comparison Type", bg="white",font = f).grid(row = 0,column = 0,padx=(20,10),pady=(10,10))
-        box = ttk.Combobox(frame, width=15,font = f)
+        box = ttk.Combobox(frame, width=20,font = f)
         box["values"] = ("Unclassed","Classed")
         box.bind("<<ComboboxSelected>>", self.boxChanged)
         box.current(self.box1Value)
@@ -768,27 +978,32 @@ class mainWindow(tkinter.Tk):
         box.grid(row=0, column=1)
 
         tkinter.Label(frame, text="VRNs", bg="white",width = 14,anchor=tkinter.E,font = f).grid(row=1, column=0,padx=(20,10),pady=(10,10))
-        box = ttk.Combobox(frame, width=15,font = f)
+        box = ttk.Combobox(frame, width=20,font = f)
         box["values"] = ("Original VRNs", "Duplicates Removed")
         box.bind("<<ComboboxSelected>>", self.boxChanged)
         box.current(self.box2Value)
         box.grid(row=1, column=1)
-        tkinter.Label(frame, text="Select Site", bg="white", width=14, anchor=tkinter.E, font=f).grid(row=1, column=2,
-                                                                                               padx=(20, 10),
-                                                                                               pady=(10, 10))
-        box = ttk.Combobox(frame, width=15, font=f)
-        box["values"] = ["Site " + str(site["siteNo"]) for site in self.dataList]
-        box.grid(row=1, column=3)
-        box.current(0)
-        box.bind("<<ComboboxSelected>>", self.siteChanged)
+        self.siteLabel = tkinter.Label(frame, text="Site 1", bg="white", width=14, anchor=tkinter.E, font=f)
+        self.siteLabel.grid(row=1, column=2,padx=(50, 10),pady=(10, 10))
+
+
         tkinter.Label(frame, text="Select Mvmt", bg="white", width=14, anchor=tkinter.E, font=f).grid(row=1, column=4,
                                                                                                       padx=(20, 10),
                                                                                                       pady=(10, 10))
+        ###
+        ### get list of movements
+        ###
+        mvmts = []
+        for site in self.dataList:
+            [mvmts.append("Movement " + str(key)) for key, movement in sorted(site["movements"].items())]
         self.movementBox = ttk.Combobox(frame, width=15, font=f)
-        self.movementBox["values"] = ["movement " + str(key) for key, movement in sorted(self.dataList[0]["movements"].items())]
+        self.movementBox["values"] = mvmts
         self.movementBox.grid(row=1, column=5)
         self.movementBox.current(0)
         self.movementBox.bind("<<ComboboxSelected>>", self.movementChanged)
+        self.currentSelected[1] = int(mvmts[0].replace("Movement",""))
+        tkinter.Button(frame,text="<",command=lambda :self.scroll_through_movements("left")).grid(row = 1,column = 7,padx = 10, pady=10)
+        tkinter.Button(frame, text=">", command=lambda :self.scroll_through_movements("right")).grid(row=1, column=8, padx=10, pady=10)
         frame.grid(row=0,column=0,sticky = "w")
         win.grid(row=0, column=0)
 
@@ -931,6 +1146,25 @@ class mainWindow(tkinter.Tk):
             col += 4 + len(OVClasses)
         self.update_comparison_display()
 
+    def scroll_through_movements(self,dir):
+        ###
+        ### using the "arrow" buttons on the comparison screen to move one by one through the
+        ### movements , either up or down the movements
+        ###
+        index = self.movementBox.current()
+        values = self.movementBox.cget("values")
+        print("movements are",len(values),values)
+        print("value is",self.movementBox.get())
+        if dir=="left":
+            if index >0:
+                self.movementBox.current(index-1)
+                self.movementBox.event_generate("<<ComboboxSelected>>",when="tail")
+        else:
+            if index<len(values)-1:
+                self.movementBox.current(index + 1)
+                print("after,value is", self.movementBox.get())
+                self.movementBox.event_generate("<<ComboboxSelected>>", when="tail")
+
     def edit_cell(self,event):
         ###
         ### deals with when an entry box is edited, it updates the data in the data structure, and saves the data
@@ -945,9 +1179,14 @@ class mainWindow(tkinter.Tk):
         for r,row in enumerate(self.comparisonDataStructure[0]):
             for c, item in enumerate(row):
                 if entry.cget("textvariable") == item._name:
-                    site = self.dataList[self.currentSelected[0]]
-                    l = [movement for key, movement in sorted(site["movements"].items())]
-                    movement = l[self.currentSelected[1]]
+                    for site in self.dataList:
+                        for key, m in site["movements"].items():
+                            if self.currentSelected[1] == key:
+                                print("selected site is", site["siteNo"])
+                                selectedSite = site
+                    l = [movement for key, movement in sorted(selectedSite["movements"].items()) if
+                         key == self.currentSelected[1]]
+                    movement = l[0]
                     if entry.get().isdigit():
                         if movement["data"][1][r][c] != int(entry.get()):
 
@@ -977,19 +1216,28 @@ class mainWindow(tkinter.Tk):
         ### and depending on what site and movement is selected
         ###
 
-        site = self.dataList[self.currentSelected[0]]
-        l = [movement for key, movement in sorted(site["movements"].items())]
-        movement = l[self.currentSelected[1]]
+        for site in self.dataList:
+            for key, m in site["movements"].items():
+                if self.currentSelected[1] == key:
+                    print("selected site is", site["siteNo"])
+                    selectedSite = site
+        l = [movement for key, movement in sorted(selectedSite["movements"].items()) if key == self.currentSelected[1]]
+        movement = l[0]
         self.calculate_display()
-        dataIndex = [(0, 0), (1, 0), (0, 1), (1, 1)].index((self.box1Value, self.box2Value)) + 2
+        dataIndex = [(0,0),(1,0),(0,1),(1,1)].index((self.box1Value, self.box2Value)) + 2
 
         ###
         ### set up which data we are going to display
         ### data for each movement is in the form [OVdata,Edited OVdata,ANPRuc/orig,ANPRuc/dupremoved,ANPRc/orig,ANPRc/dupremoved]
         ### dataindex gives us the index of the ANPR data
         ###
-
+        print("selected boxes",(self.box1Value, self.box2Value))
+        print("site",selectedSite["siteNo"],"movement",self.currentSelected[1])
+        for item in movement["data"]:
+            print(item)
         displayedData=[movement["data"][1],movement["data"][dataIndex]]
+        print("we are actually displaying index",dataIndex)
+        print(displayedData)
         for index,block in enumerate(displayedData):
             vars = self.comparisonDataStructure[index]
             for i,row in enumerate(block):
@@ -1016,6 +1264,7 @@ class mainWindow(tkinter.Tk):
             if self.box2Value == current:
                 return
             self.box2Value = current
+        print(self.box1Value,self.box2Value)
         self.update_comparison_display()
 
     def revert(self,event):
@@ -1028,10 +1277,14 @@ class mainWindow(tkinter.Tk):
         ### the base data
 
         print("disply status is",self.displayStatus)
-        site = self.dataList[self.currentSelected[0]]
-        l = [movement for key, movement in sorted(site["movements"].items())]
-        movement = l[self.currentSelected[1]]
-
+        for site in self.dataList:
+            for key, m in site["movements"].items():
+                if self.currentSelected[1] == key:
+                    print("selected site is", site["siteNo"])
+                    selectedSite = site
+        l = [movement for key, movement in sorted(selectedSite["movements"].items()) if key == self.currentSelected[1]]
+        movement = l[0]
+        print("selected movement is",movement)
         if self.displayStatus == "base":
             ### we are in reverted state, and user requested to go back to edited state
             self.displayStatus = "edited"
@@ -1047,7 +1300,7 @@ class mainWindow(tkinter.Tk):
         return "break"
 
     def validate_edit(self,action,text,char):
-        print("action is", action, type(action))
+        #print("action is", action, type(action))
         print("char is",char,text)
         if action == "0":
             #print("yes")
@@ -1067,7 +1320,7 @@ class mainWindow(tkinter.Tk):
             # print("looing for ", cl)
             ANPRtoOVdict[cl] = []
             for item in [i for i, x in enumerate(self.currentJob["classification"].split(",")) if
-                         x == cl and i % 2 == 1]:
+                         x.lower() == cl.lower() and i % 2 == 1]:
                 ANPRtoOVdict[cl].append(OVClasses.index(self.currentJob["classification"].split(",")[item - 1]))
         for site in self.dataList:
             #print("site is", site)
@@ -1085,7 +1338,7 @@ class mainWindow(tkinter.Tk):
 
 
                 OVdata = movement["data"][1]
-                dataIndex = [(0, 0), (1, 0), (0, 1), (1, 1)].index((self.box1Value, self.box2Value)) + 2
+                dataIndex = [(0,0),(1,0),(0,1),(1,1)].index((self.box1Value, self.box2Value)) + 2
                 ANPRdata = movement["data"][dataIndex]
 
                 for i, item in enumerate(OVdata):
@@ -1156,9 +1409,12 @@ class mainWindow(tkinter.Tk):
                     summary = mvt["summary"]
                     item.append(summary["OVTotal"])
                     item.append(summary["ANPRTotal"])
-                    item.append(summary["AvgCapture"])
-                    item.append(summary["MinCapture"])
-                    item.append(summary["MaxCapture"])
+                    item.append(str(summary["AvgCapture"]) + "%")
+                    if summary["MinCapture"] ==1000:
+                        item.append("0%")
+                    else:
+                        item.append(str(summary["MinCapture"]) + "%")
+                    item.append(str(summary["MaxCapture"]) + "%")
                     item.append(summary["TimeLessThan"])
                     if self.currentJob["comments"][count] is None:
                         item.append("")
@@ -1187,16 +1443,19 @@ class mainWindow(tkinter.Tk):
         for cl in ANPRClasses:
             # print("looing for ", cl)
             ANPRtoOVdict[cl] = []
-            for item in [i for i, x in enumerate(self.currentJob["classification"].split(",")) if x == cl and i % 2 == 1]:
+            for item in [i for i, x in enumerate(self.currentJob["classification"].split(",")) if x.lower() == cl.lower() and i % 2 == 1]:
                 ANPRtoOVdict[cl].append(OVClasses.index(self.currentJob["classification"].split(",")[item - 1]))
 
         rowList = []  ### holds the blocks of data that we want to sum by column
 
 
-        site = self.dataList[self.currentSelected[0]]
-        #print("site is",site)
-        l = [movement for key, movement in sorted(site["movements"].items())]
-        movement = l[self.currentSelected[1]]
+        for site in self.dataList:
+            for key, m in site["movements"].items():
+                if self.currentSelected[1] == key:
+                    print("selected site is", site["siteNo"])
+                    selectedSite = site
+        l = [movement for key, movement in sorted(selectedSite["movements"].items()) if key == self.currentSelected[1]]
+        movement = l[0]
 
         movement["summary"] = {}
         movement["summary"]["OVTotal"] = 0
@@ -1209,7 +1468,7 @@ class mainWindow(tkinter.Tk):
         #print("site no", site["siteNo"], ",currently selected movement is",movement)
 
         OVdata = list(movement["data"][1])
-        dataIndex = [(0, 0), (1, 0), (0, 1), (1, 1)].index((self.box1Value,self.box2Value)) + 2
+        dataIndex = [(0,0),(1,0),(0,1),(1,1)].index((self.box1Value,self.box2Value)) + 2
         ANPRdata = movement["data"][dataIndex]
 
         ###
@@ -1270,6 +1529,7 @@ class mainWindow(tkinter.Tk):
                     if value < 85:
                         movement["summary"]["TimeLessThan"] += 1
                 compRowData.append(value)
+            compRowData = [str(item) + "%" for item in compRowData]
             compRowData.insert(0, timestamp)
             compData.append(compRowData)
 
@@ -1289,46 +1549,42 @@ class mainWindow(tkinter.Tk):
 
         for label in self.colourLabels:
             val = label.cget("text")
+            print("val is",val)
             if val =="":
                 val = 0
             else:
-                val = int(val)
+                val = int(val.replace("%",""))
             label.configure(fg=get_colour(val))
 
-    def siteChanged(self,event):
-        tabNo = event.widget.current()
-        print("selected site index is",tabNo)
-        if self.displayStatus == "base":
-            site = self.dataList[self.currentSelected[0]]
-            l = [movement for key, movement in sorted(site["movements"].items())]
-            movement = l[self.currentSelected[1]]
-            movement["data"][1] = self.tempEditedDataStore
-            self.tempEditedDataStore = []
-        self.displayStatus = "edited"
-        self.revertButton.configure(text="Revert")
-        print("in site changed,currently selected tab and movement indexes", self.currentSelected)
-        print("selected site index is", tabNo)
-        self.currentSelected = [tabNo, 0]
-        print("currently selected tab and movement indexes",self.currentSelected)
-        self.movementBox["values"] = ["movement " + str(key) for key, movement in sorted(self.dataList[tabNo]["movements"].items())]
-        print(self.movementBox["values"])
-        self.movementBox.current(0)
-        self.update_comparison_display()
-        self.update()
-        self.update_idletasks()
-        #return "break"
-
     def movementChanged(self,event):
-        tabNo = event.widget.current()
+
+
         if self.displayStatus == "base":
-            site = self.dataList[self.currentSelected[0]]
-            l = [movement for key, movement in sorted(site["movements"].items())]
-            movement = l[self.currentSelected[1]]
+            ###
+            ### if the user has reverted, then not edited anything, then changed movement, we need to
+            ### deal with the reverted data, putting it back into the previously viewed movement
+            ###
+            for site in self.dataList:
+                for key, m in site["movements"].items():
+                    if self.currentSelected[1] == key:
+                        print("selected site is", site["siteNo"])
+                        selectedSite = site
+            l = [movement for key, movement in sorted(selectedSite["movements"].items()) if key == self.currentSelected[1]]
+            movement = l[0]
             movement["data"][1] = self.tempEditedDataStore
             self.tempEditedDataStore = []
+
+        mvmnt = int(event.widget.get().replace("Movement", ""))
+        for site in self.dataList:
+            for key, m in site["movements"].items():
+                if mvmnt == key:
+                    print("selected site is", site["siteNo"])
+                    selectedSite = site
+        self.siteLabel.configure(text="Site " + str(selectedSite["siteNo"]))
+        self.currentSelected[0] = selectedSite["siteNo"]
+        self.currentSelected[1] = mvmnt
         self.displayStatus = "edited"
         self.revertButton.configure(text="Revert")
-        self.currentSelected[1] =tabNo
 
         self.update_comparison_display()
         self.update()
@@ -1344,19 +1600,13 @@ class mainWindow(tkinter.Tk):
         self.spawn_home_window()
 
     def delete_job(self):
-        print(self.tree.selection())
-        if self.tree.selection() is None:
-            return
         if self.tree.selection() == "":
             return
         jobname = self.tree.item(self.tree.selection()[0])
-        print("selected job", jobname["values"])
         result = messagebox.askyesno(message="Are you sure you want to delete this project?")
         if not result:
             return
         myDB.delete_job(jobname["values"][0], jobname["values"][1], jobname["values"][2])
-        #title = self.currentJob["jobno"] + " " + self.currentJob["jobname"]
-        #self.wm_title(title)
         self.spawn_survey_setup_screen()
 
     def export_OVTemplate(self):
@@ -1364,12 +1614,10 @@ class mainWindow(tkinter.Tk):
         try:
             sheet = wb.get_sheet_by_name("Temp")
         except Exception as e:
-            messagebox("Trying to export to excel, sheet Temp doesnt exist in the template file,cannot export")
+            messagebox.showinfo(message="Trying to export to excel, sheet Temp doesnt exist in the template file,cannot export")
             return
         classes = self.currentJob["classification"].split(",")
-        print("classes are",classes)
         classes = [x for i,x in enumerate(classes) if i % 2 == 0]
-        print("now classes are ",classes)
         for i,c in enumerate(classes):
             sheet.cell(row = 1 + i,column=1).value = c
         times = self.currentJob["timeperiod1"].split("-") + self.currentJob["timeperiod2"].split("-") + self.currentJob["timeperiod3"].split("-") + self.currentJob["timeperiod4"].split("-")
@@ -1424,6 +1672,17 @@ class mainWindow(tkinter.Tk):
             self.reprocessDataFunction = fun
         if text == "set duplicates":
             self.setDuplicatesFunction = fun
+        if text == "get cordon in out only data":
+            self.getCordonFunction = fun
+        if text == "get cordon non directional data":
+            self.getNonDirectionalCordonFunction = fun
+        if text == "get fs-ls directional data":
+            self.getRouteAssignmentFsLsFunction = fun
+        if text == "get fs-ls non directional data":
+            self.getRouteAssignmentFsLsNonDirectionalFunction = fun
+
+
+
 
 
 def get_colour(value):
@@ -1451,18 +1710,19 @@ class VerticalScrolledFrame(tkinter.Frame):
         # create a canvas object and a vertical scrollbar for scrolling it
         vscrollbar = tkinter.Scrollbar(self, orient=tkinter.VERTICAL,bg="white")
         vscrollbar.pack(fill=tkinter.Y, side=tkinter.RIGHT, expand=tkinter.TRUE)
-        canvas = tkinter.Canvas(self, bd=0, highlightthickness=0,bg="white",
+        self.canvas = tkinter.Canvas(self, bd=0, highlightthickness=0,bg="white",
                         yscrollcommand=vscrollbar.set,height = 800)
-        canvas.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=tkinter.TRUE)
-        vscrollbar.config(command=canvas.yview)
+        self.canvas.bind_all("<MouseWheel>",self.on_mousewheel)
+        self.canvas.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=tkinter.TRUE)
+        vscrollbar.config(command=self.canvas.yview)
 
         # reset the view
-        canvas.xview_moveto(0)
-        canvas.yview_moveto(0)
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
 
         # create a frame inside the canvas which will be scrolled with it
-        self.interior = interior = tkinter.Frame(canvas,bg="white",width = 100)
-        interior_id = canvas.create_window(0, 0, window=interior,
+        self.interior = interior = tkinter.Frame(self.canvas,bg="white",width = 100)
+        interior_id = self.canvas.create_window(0, 0, window=interior,
                                            anchor=tkinter.NW)
 
         # track changes to the canvas and frame width and sync them,
@@ -1472,10 +1732,10 @@ class VerticalScrolledFrame(tkinter.Frame):
             size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
             #print("required size is",size)
             #print("actual size is",canvas.winfo_width(),canvas.winfo_height())
-            canvas.config(scrollregion="0 0 %s %s" % size)
-            if interior.winfo_reqwidth() != canvas.winfo_width():
+            self.canvas.config(scrollregion="0 0 %s %s" % size)
+            if interior.winfo_reqwidth() != self.canvas.winfo_width():
                 # update the canvas's width to fit the inner frame
-                canvas.config(width=interior.winfo_reqwidth())
+                self.canvas.config(width=interior.winfo_reqwidth())
             #if interior.winfo_reqheight() != canvas.winfo_height():
                 # update the canvas's height to fit the inner frame
                 #canvas.config(height=interior.winfo_reqheight())
@@ -1483,8 +1743,11 @@ class VerticalScrolledFrame(tkinter.Frame):
         interior.bind('<Configure>', _configure_interior)
 
         def _configure_canvas(event):
-            if interior.winfo_reqwidth() != canvas.winfo_width():
+            if interior.winfo_reqwidth() != self.canvas.winfo_width():
                 # update the inner frame's width to fill the canvas
-                canvas.itemconfigure(interior_id, width=canvas.winfo_width())
-        canvas.bind('<Configure>', _configure_canvas)
+                self.canvas.itemconfigure(interior_id, width=self.canvas.winfo_width())
+                self.canvas.bind('<Configure>', _configure_canvas)
+
+    def on_mousewheel(self,event):
+        self.canvas.yview_scroll(-1 * int(event.delta / 120), "units")
 

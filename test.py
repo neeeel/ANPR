@@ -7,6 +7,8 @@ import os.path
 import mainwindow
 import myDB
 import pickle
+import copy
+import time
 
 flag = False
 
@@ -298,7 +300,7 @@ def load_job(job):
     print(df.head())
     for i in range(31):
         duplicates.append (len(df[df["timeDiff"] == pd.Timedelta(seconds=i)]))
-
+    df["newMovement"] = df["newMovement"].astype(int,raise_on_error=False)
     for i in range(0, 465, 15):
         mask = (df["timeDiff"] >= pd.Timedelta(seconds=i)) & (df["timeDiff"] < pd.Timedelta(seconds=i + 15))
         duplicates.append (len(df[mask]))
@@ -337,6 +339,11 @@ def compute_comparison_data(job):
     ### each set of data is set up ready to display, with column and row totals, and timestamps already entered
     ###
 
+    oldData = None
+    if os.path.isfile(job["folder"] + "/comparisondata.pkl"):
+        with open(job["folder"] + '/comparisondata.pkl', 'rb') as handle:
+           oldData = pickle.load(handle)
+
     global df,overviewDf
     if overviewDf is None:
         messagebox.showinfo(message="No Overview counts loaded")
@@ -352,7 +359,7 @@ def compute_comparison_data(job):
     ANPRtoOVdict = {} ### this will hold a dictionary of how we combine the OV classes into the ANPR classes
     for cl in ANPRClasses:
         ANPRtoOVdict[cl] = []
-        for item in [i for i, x in enumerate(job["classification"].split(",")) if x == cl and i % 2 == 1]:
+        for item in [i for i, x in enumerate(job["classification"].split(",")) if x.lower() == cl.lower() and i % 2 == 1]:
             ANPRtoOVdict[cl].append(OVClasses.index(job["classification"].split(",")[item-1]))
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
@@ -411,6 +418,7 @@ def compute_comparison_data(job):
 
             for index,combination in enumerate([(0,0),(1,0),(0,1),(1,1)]): #combinations of classed,unclassed,duplicates,etc
                 a,b = combination
+                print("site",siteNo,"combination",combination)
                 ANPRdata = []
                 for t in range(0, len(times) - 1, 2):
                     result = get_ANPR_data(job, movement, times[t], times[t + 1], a, b)
@@ -449,9 +457,19 @@ def compute_comparison_data(job):
                 mvt["summary"]["AvgCapture"] = int(
                     mvt["summary"]["ANPRTotal"] * 100 / mvt["summary"]["OVTotal"])
         results.append(site)
-    print("finished processing")
+    ###
+    ### If there is any comparison data saved, get the edited portion of the data, and fill in the newly
+    ### calculated site comparison data with the edited section of the saved comparison data.
+    ###
+
+    if not oldData is None:
+        for index, oldSite in enumerate(oldData):
+            newsite = results[index]
+            for key, details in oldSite["movements"].items():
+                newsite["movements"][key]["data"][1] = copy.deepcopy(details["data"][1])
     with open(job["folder"] + '/comparisondata.pkl', 'wb') as handle:
         pickle.dump(results, handle)
+    print("finished processing")
     return results
 
 def get_ANPR_data(job,movement,startTime,endTime,classed,duplicates_removed):
@@ -466,7 +484,10 @@ def get_ANPR_data(job,movement,startTime,endTime,classed,duplicates_removed):
     numRows = len(indexDf)
     tempdf = df[d].query(mask).between_time(startTime, endTime, include_end=False)
     tempdf.sort_index(inplace=True)
-
+    if duplicates_removed == True:
+        l= len(tempdf)
+        tempdf = tempdf[tempdf["Duplicates"] == "N"]
+        print("removed", l-len(tempdf))
     for cl in ANPRClasses:
         ###
         ### find all vehicles of a class cl
@@ -569,6 +590,8 @@ def get_ANPR_data(job,movement,startTime,endTime,classed,duplicates_removed):
     ### now df_filtered is in the correct structure, a column for each class, and a column for total vehicles
     ### we remove unneeded columns, and produce a list of lists, one list for each time sample
     ###
+
+
     #print(df_filtered.head())
     df_filtered.index.name = "Date"
     df_filtered.reset_index(inplace=True)
@@ -627,7 +650,7 @@ def reprocess_data(job,OVdata,ANPRdata):
     for cl in ANPRClasses:
         #print("looing for ", cl)
         ANPRtoOVdict[cl] = []
-        for item in [i for i, x in enumerate(job["classification"].split(",")) if x == cl and i % 2 == 1]:
+        for item in [i for i, x in enumerate(job["classification"].split(",")) if x.lower() == cl.lower() and i % 2 == 1]:
             ANPRtoOVdict[cl].append(OVClasses.index(job["classification"].split(",")[item - 1]))
 
     rowList = []  ### holds the blocks of data that we want to sum by column
@@ -741,6 +764,346 @@ def set_new_duplicates_value(index,job):
     set_duplicates(index)
     compute_comparison_data(job)
 
+def test_apply(row,row_offset):
+    print(row)
+    print(row_offset)
+    exit()
+
+def format_timedelta(td):
+    minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
+    hours, minutes = divmod(minutes, 60)
+    return '{:d}:{:02d}:{:02d}'.format(hours, minutes, seconds)
+
+def match_every_second_row(grp):
+    if len(grp) >=2:
+        grp[::2]["matched"]="Y"
+        grp["matched"].iloc[-1] = "N"
+    time.sleep(0.001)
+    #print("done")
+    return grp
+
+def calculate_nondirectional_cordon(job):
+    global df
+    inMov = []
+    outMov = []
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    start = datetime.datetime.now()
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
+             + job["timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index, t in enumerate(times[:-1]):
+        temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        temp.index.name = "Date"
+        temp.reset_index(inplace=True)
+        temp = temp[temp["newMovement"] >= 0]
+        temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+        temp["matched"] = "N"
+        grp = temp.groupby(["VRN"])
+        temp["matched"][grp.cumcount() % 2 == 0] = "Y"
+        temp["matched"][grp.cumcount(ascending=False) == 0] = "N"
+        temp["outTime"] = temp["Date"].shift(-1)
+        temp["outMovement"] = temp["newMovement"].shift(-1)
+        temp["newMovement"] = temp["newMovement"].real.astype(int)
+        temp["outMovement"] = temp["outMovement"].real.astype(int)
+        try:
+            temp.to_csv(job["folder"] + "/non directional full data.csv", index=False)
+        except PermissionError as e:
+            messagebox.showinfo(
+                message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+        temp = temp[temp["matched"] == "Y"]
+        dataframes.append(temp)
+
+    temp = pd.concat(dataframes)
+    temp = temp[temp["outMovement"] >= 0]
+    temp["newMovement"].dropna(inplace=True)
+    #print(temp[temp["newMovement"]]==49)
+    counts = temp.groupby(["newMovement", "outMovement"]).size()
+    print("counts is", counts)
+    result = [list(zip(counts.index.values, counts.values.tolist()))]
+    for item in result[0]:
+        i, o = item[0]
+        if i not in inMov:
+            inMov.append(i)
+        if o not in outMov:
+            outMov.append(o)
+    inMov = sorted(inMov)
+    outMov = sorted(outMov)
+    inDf = pd.DataFrame(index=inMov)
+    print("inDf is",inDf)
+    outDf = pd.DataFrame(index=outMov)
+
+    inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
+    print("before, intotals is",inTotals)
+    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("inTotals is", inTotals, inTotals.columns.values)
+    outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
+    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print(outTotals)
+    result.append(inTotals[0].values.tolist())
+    result.append(outTotals[0].values.tolist())
+    del temp["Movement"]
+    del temp["Duplicates"]
+    del temp["Site"]
+    del temp["dir"]
+    del temp["timeDiff"]
+    del temp["matched"]
+    temp["duration"] = temp["outTime"] - temp["Date"]
+    print(temp.info())
+    print(temp.head())
+    temp["duration"] = temp["duration"].apply(format_timedelta)
+    print(temp.info())
+    print(temp.head())
+    temp = temp[["VRN", "Class", "Date", "newMovement", "outTime", "outMovement", "duration"]]
+    try:
+        temp.to_csv(job["folder"] + "/non-directional matched.csv",
+                    header=["VRN", "Class", "Date", "In Movement", "outTime", "Out Movement", "Duration"], index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    return result
+
+def calculate_cordon_in_out_only(job):
+    global df
+    inMov = []
+    outMov = []
+    for site, details in job["sites"].items():
+        for mvmtNo, mvmt in details.items():
+            if mvmt["dir"] == 1:
+                inMov.append(int(mvmt["newmovement"]))
+            if mvmt["dir"] == 2:
+                outMov.append(int(mvmt["newmovement"]))
+    inDf = pd.DataFrame(index=inMov)
+    outDf = pd.DataFrame(index=outMov)
+    fullDf = df[datetime.datetime.strftime(job["surveydate"],"%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
+             + job["timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index,t in enumerate(times[:-1]):
+        temp = fullDf.between_time(times[index],times[index+1],include_end=False)
+        temp.index.name= "Date"
+        temp.reset_index(inplace=True)
+        temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
+        mask = ((temp["dir"]==1) & (temp["dir"].shift(-1)==2) &(temp["VRN"] == temp["VRN"].shift(-1)))
+        temp["matched"] = "N"
+        temp["matched"][mask]= "Y"
+        temp["outTime"] = temp["Date"].shift(-1)
+        temp["outMovement"] = temp["newMovement"].shift(-1)
+        temp["newMovement"] = temp["newMovement"].real.astype(int)
+        temp["outMovement"] = temp["outMovement"].real.astype(int)
+        temp = temp[temp["matched"]=="Y"]
+        dataframes.append(temp)
+
+    temp = pd.concat(dataframes)
+    counts = temp.groupby(["newMovement","outMovement"]).size()
+    inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
+    inTotals = inDf.merge(inTotals,how="left",left_index=True,right_index=True).fillna(0)
+    outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
+    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print(outTotals)
+    result =[list(zip(counts.index.values,counts.values.tolist()))]
+    result.append(inTotals[0].values.tolist())
+    result.append(outTotals[0].values.tolist())
+    del temp["Movement"]
+    del temp["Duplicates"]
+    del temp["Site"]
+    del temp["dir"]
+    del temp["timeDiff"]
+    del temp["matched"]
+    temp["duration"] = temp["outTime"] -  temp["Date"]
+    temp["duration"] = temp["duration"].apply(format_timedelta)
+    temp = temp[["VRN","Class","Date","newMovement","outTime","outMovement","duration"]]
+    try:
+        temp.to_csv(job["folder"] + "/in-out-only matched.csv",header=["VRN","Class","Date","In Movement","outTime","Out Movement","Duration"],index=False)
+    except PermissionError as e:
+        messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    return result
+
+
+def calculate_route_assignment_fs_ls_non_directional(job):
+    global df
+    inMov = []
+    outMov = []
+
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
+             + job["timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index, t in enumerate(times[:-1]):
+        temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        temp.index.name = "Date"
+        temp.reset_index(inplace=True)
+        temp = temp[temp["newMovement"] >= 0]
+        temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+
+        ###
+        ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
+        ###
+        print("before removing singletons",len(temp))
+        temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
+        print("after removing",len(temp))
+
+        ###
+        ### find first occurence of a plate. We dont care about direction
+        ###
+        grp = temp.groupby(["VRN"])
+        result1 = temp[grp.cumcount() == 0]
+
+        ###
+        ### find last occurence of a plate
+        ###
+        result2 = temp[grp.cumcount(ascending=False) == 0]
+        fullResult = pd.concat([result1, result2])
+
+        fullResult.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+        fullResult["outTime"] = fullResult["Date"].shift(-1)
+        fullResult["newMovement"] = fullResult["newMovement"].real.astype(int)
+        fullResult["outMovement"] = fullResult["newMovement"].shift(-1)
+        fullResult["outMovement"] = fullResult["outMovement"].real.astype(int)
+        fullResult=fullResult.iloc[::2]
+        print(fullResult.head())
+        dataframes.append(fullResult)
+
+    temp = pd.concat(dataframes)
+    temp["duration"] = temp["outTime"] - temp["Date"]
+    temp["duration"] = temp["duration"].apply(format_timedelta)
+    counts = temp.groupby(["newMovement", "outMovement"]).size()
+    result = [list(zip(counts.index.values, counts.values.tolist()))]
+    for item in result[0]:
+        i, o = item[0]
+        if i not in inMov:
+            inMov.append(i)
+        if o not in outMov:
+            outMov.append(o)
+    inMov = sorted(inMov)
+    outMov = sorted(outMov)
+    inDf = pd.DataFrame(index=inMov)
+    outDf = pd.DataFrame(index=outMov)
+    inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
+    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("inTotals is", inTotals)
+    outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
+    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print(outTotals)
+    result = [list(zip(counts.index.values, counts.values.tolist()))]
+    result.append(inTotals[0].values.tolist())
+    result.append(outTotals[0].values.tolist())
+    del temp["Movement"]
+    del temp["Duplicates"]
+    del temp["Site"]
+    del temp["dir"]
+    del temp["timeDiff"]
+    temp = temp[["VRN", "Class", "Date", "newMovement", "outTime", "outMovement", "duration"]]
+    try:
+        temp.to_csv(job["folder"] + "/route assignment fs-ls matched non directional.csv",
+                    header=["VRN", "Class", "Date", "In Movement", "outTime", "Out Movement", "Duration"],
+                    index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    return result
+
+
+def calculate_route_assignment_fs_ls_directional(job):
+    global df
+    inMov = []
+    outMov = []
+    for site, details in job["sites"].items():
+        for mvmtNo, mvmt in details.items():
+            if mvmt["dir"] == 1:
+                inMov.append(int(mvmt["newmovement"]))
+            if mvmt["dir"] == 2:
+                outMov.append(int(mvmt["newmovement"]))
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
+             + job["timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index, t in enumerate(times[:-1]):
+        temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        temp.index.name = "Date"
+        temp.reset_index(inplace=True)
+        temp = temp[temp["newMovement"] >= 0]
+        temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+
+        ###
+        ### get all plates that have an "in" direction
+        ###
+        inDf = temp[temp["dir"]== 1]
+        ###
+        ### group them by VRN, and select the first in from each group
+        ###
+        grp = inDf.groupby(["VRN"])
+        result1 = inDf[grp.cumcount()==0]
+
+        ###
+        ### get all plates that have an "out" direction
+        ###
+        outDf = temp[temp["dir"] == 2]
+        ###
+        ### group them by VRN, and select the last out from each group
+        ###
+        grp = outDf.groupby(["VRN"])
+        result2 = outDf[grp.cumcount(ascending=False) == 0]
+        fullResult = pd.concat([result1,result2])
+        print(fullResult.head())
+        fullResult.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+        ###
+        ### there may be instances where a plate only appears once in the data. It may have been selected as an
+        ### "in" plate, where there are 2 in plates, and no out plates.Or as an out plate in similar circumstances
+        ### so we need to remove any non duplicate rows
+        ###
+        fullResult = fullResult[fullResult.duplicated(subset=["VRN"],keep=False)]
+
+        ###
+        ### set up new columns for when we output
+        fullResult["outTime"] = fullResult["Date"].shift(-1)
+        fullResult["newMovement"] = fullResult["newMovement"].real.astype(int)
+        fullResult["outMovement"] = fullResult["newMovement"].shift(-1)
+        fullResult["outMovement"] = fullResult["outMovement"].real.astype(int)
+
+        ###
+        ### the last out may occur before the first in , so we select all rows where the following plate is the same,
+        ### and the second occurence is an out. This gives us the full matched plates, with in time, out time, in movement
+        ### and out movement
+        ###
+        mask = ((fullResult["dir"] == 1) & (fullResult["dir"].shift(-1) == 2) & (fullResult["VRN"] == fullResult["VRN"].shift(-1)))
+        fullResult = fullResult[mask]
+
+        dataframes.append(fullResult)
+
+    temp = pd.concat(dataframes)
+    temp["duration"] = temp["outTime"] - temp["Date"]
+    temp["duration"] = temp["duration"].apply(format_timedelta)
+    counts = temp.groupby(["newMovement", "outMovement"]).size()
+    inDf = pd.DataFrame(index=inMov) ### silly to name inDf similar to a name used earlier....
+    outDf = pd.DataFrame(index=outMov)
+    inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
+    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("inTotals is", inTotals)
+    outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
+    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print(outTotals)
+    result = [list(zip(counts.index.values, counts.values.tolist()))]
+    result.append(inTotals[0].values.tolist())
+    result.append(outTotals[0].values.tolist())
+    del temp["Movement"]
+    del temp["Duplicates"]
+    del temp["Site"]
+    del temp["dir"]
+    del temp["timeDiff"]
+    temp = temp[["VRN", "Class", "Date", "newMovement", "outTime", "outMovement", "duration"]]
+    try:
+        temp.to_csv(job["folder"] + "/route assignment fs-ls matched.csv",
+                    header=["VRN", "Class", "Date", "In Movement", "outTime", "Out Movement", "Duration"], index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    return result
+
+
 file = "C:/Users/NWatson/Desktop/ANPR data/3279-Lon, Oxford_Unclassed_Plates_9d3f3926-36ba-47b2-bda9-70516b735a874085337599898377328 (4).xlsx"
 #file = "C:/Users/NWatson/Desktop/ANPR data/test.xlsx" ## cut down version of above file
 
@@ -751,9 +1114,9 @@ def test():
     global df,overviewDf
     myDB.set_file("C:/Users/NWatson/PycharmProjects/ANPR/blah.sqlite")
     job = myDB.load_job("3279-LON","A34 Oxford","05/07/16")
+    #print(job["sites"])
     load_job(job)
-    load_unclassed_plates(job)
-    df.to_csv("dumped.csv")
+    calculate_route_assignment_fs_ls_non_directional(job)
     exit()
     #data = compute_comparison_data(job)
     with open('filename.pickle', 'rb') as handle:
@@ -776,29 +1139,8 @@ win.setCallbackFunction("load classed",load_classes)
 win.setCallbackFunction("get unclassed comparison",get_comparison_data)
 win.setCallbackFunction("reprocess data",reprocess_data)
 win.setCallbackFunction("set duplicates",set_new_duplicates_value)
+win.setCallbackFunction("get cordon in out only data",calculate_cordon_in_out_only)
+win.setCallbackFunction("get cordon non directional data",calculate_nondirectional_cordon)
+win.setCallbackFunction("get fs-ls directional data",calculate_route_assignment_fs_ls_directional)
+win.setCallbackFunction("get fs-ls non directional data",calculate_route_assignment_fs_ls_non_directional)
 win.mainloop()
-
-#df = pd.read_pickle("pickled.txt")
-#d1 = datetime.datetime.strptime("05/07/16 12:00:00","%d/%m/%y %H:%M:%S")
-#get_movement_data(1,15,"09:00","16:00")
-#print(df["2016-07-05"])
-#exit()
-#print(df["2016-07-05"].between_time("13:00","16:00").resample("15T").count())
-#exit()
-#print(df.Movement.unique())
-#df["VRN"][df["VRN"]=="T6CBL"] = "OU16EZH"
-#df["Movement"][df["VRN"]=="CV52NSZ"] = 2
-#df["VRN"][df["VRN"]=="CV52NSZ"] = "Y742BOK"
-#counts =df.VRN.value_counts()
-#print(counts[counts==2].index)
-#print(df[counts[counts==1].index])
-#print(df)
-#print(df[df[["VRN","Movement"]].duplicated()])
-#df.drop_duplicates(["VRN","Movement"],inplace=True)
-#print("-"*20)
-#counts =df.VRN.value_counts()
-#print(df.loc[df["VRN"].isin(counts[counts==2].index)])
-#print(df.resample("40S",how="count").head())
-#print(df.info())
-#get_movement_data(1,15)
-#print(df.iloc[1])
