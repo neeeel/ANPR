@@ -11,6 +11,7 @@ import copy
 import time
 import csv
 import threading
+import shutil
 
 flag = False
 
@@ -1255,19 +1256,15 @@ def test():
     job = myDB.load_job("3279-LON","A34 Oxford","05/07/16")
     #print(job["sites"])
     load_job(job)
-    calculate_route_assignment_full_routes(job)
-    exit()
-    #data = compute_comparison_data(job)
-    with open('filename.pickle', 'rb') as handle:
-        data = pickle.load(handle)
-    print(data[0])
-    exit()
-    with open('filename.pickle', 'wb') as handle:
-        pickle.dump(data, handle)
+    path = filedialog.askdirectory()
+    fileList = os.listdir(path)
+    print(fileList)
+    for file in fileList:
+        shutil.move(path + "/" + file , "C:/Users/NWatson/Desktop/ANPR data/" + file)
     exit()
 
 
-#test()
+test()
 
 win = mainwindow.mainWindow()
 win.setCallbackFunction("load unclassed",load_unclassed_plates)
