@@ -117,7 +117,6 @@ def save_Job(data):
     row = result.fetchone()
     if row is not None:
         if messagebox.askyesno(message="This job already exists, do you want to overwrite it?"):
-            print("phoo")
             jobID = row[0]
 
             for site in cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall():

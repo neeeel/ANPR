@@ -13,21 +13,26 @@ import threading
 import os
 import myDB
 import pickle
+import time
 
 
 class mainWindow(tkinter.Tk):
 
     def __init__(self):
         super(mainWindow, self).__init__()
+        ttk.Style().configure(".",bg="white")
         self.colourLabels = []
         self.entryValues = []
         self.revertButton = None
+        self.overtakingPairsDict = {}
+        self.processOvertakingThread = None
         self.siteLabel = None
         self.box1Value = 0
         self.box2Value = 0 ### to keep track of the combo boxes on the comparison display sheet
         self.durationsDictionary = None
         self.selectedDuplicates = None
         self.getJourneyPairsFunction = None
+        self.getOvertakingDataFunction = None
         self.getRouteAssignmentFsLsFunction = None
         self.loadUnclassedFunction = None
         self.loadClassedFunction = None
@@ -37,10 +42,12 @@ class mainWindow(tkinter.Tk):
         self.setDuplicatesFunction = None
         self.getCordonFunction = None
         self.getRouteAssignmentFsLsFunction = None
+        self.updateDataFunction = None
         self.displayWin = None
         self.currentSelected = [0,0]
         self.loadOVCountsFunction = None
         self.getUnclassedComparisonFunction = None
+        self.resampleOvertakingDataFunction =None
         self.displayStatus = "edited" ## stores whether to display base comparison data, or edited comparison data
         self.geometry("600x500")
         self.movementTabs = None
@@ -83,6 +90,140 @@ class mainWindow(tkinter.Tk):
     def get_cordon_data(self):
         data = self.getCordonFunction(self.currentJob)
         self.draw_cordon_matrix(self.matrixCanvas,data)
+
+    def spawn_overtaking_setup_screen(self):
+        for child in self.winfo_children():
+            child.destroy()
+        self.overtakingPairsDict = {}
+        width = self.winfo_screenwidth() - 320
+        height = self.winfo_screenheight() - 200
+        f = tkinter.font.Font(family="helvetica", size=10)
+        frame = tkinter.Frame(self,bg="white")
+        frame.grid(row=0,column=0,padx=20,pady=15)
+        tkinter.Label(frame, text=" Mvmt 1 ",bg="white").grid(row=0, column=0)
+        tkinter.Label(frame, text="  ",bg="white").grid(row=0, column=1)
+        tkinter.Label(frame, text=" Mvmt 2 ",bg="white").grid(row=0, column=2)
+        e =tkinter.Entry(frame,width=4,bg="white")
+        e.grid(row=1,column = 0)
+        e.focus()
+        tkinter.Label(frame,text = " - " ,bg="white").grid(row =1,column = 1)
+        e =tkinter.Entry(frame,width=4,bg="white")
+        e.bind("<Return>",self.add_overtaking_pair)
+        e.bind("<Tab>", self.add_overtaking_pair)
+        e.grid(row=1, column=2)
+        lbox =tkinter.Listbox(frame,bg= "white",font = f)
+        lbox.grid(row = 2,column=0,columnspan=3)
+        lbox.bind("<Double-Button-1>",self.overtaking_pair_selected)
+        cols = ["Time","No. of Vehicles","Average Duration","Average Speed","No. of Maneouvres","No. Overtaking","No. Overtaken"]
+        self.overtakingTree = ttk.Treeview(frame,columns=cols,height=12,show="headings")
+        self.overtakingTree.grid(row = 2,rowspan = 3,column = 3,padx=20)
+        self.overtakingTree.heading(0, text="WERW")
+        for i,c in enumerate(cols):
+            self.overtakingTree.heading(i, text=c)
+            self.overtakingTree.column(i, width=130, anchor=tkinter.CENTER)
+        cols = ["Time Bin","No of Vehicles"]
+        self.binTree = ttk.Treeview(frame,columns=cols,height=24,show="headings")
+        #self.binTree.grid(row = 4,column=0,padx=20)
+        frame = tkinter.Frame(self,bg="white",relief=tkinter.GROOVE,borderwidth=2)
+        f1 = tkinter.font.Font(family="helvetica", size=10)
+        tkinter.Label(frame,text = "Time Bin",font = f1,bg="white").grid(row = 0,column = 0)
+        tkinter.Label(frame, text="No of Vehicles", font=f1,bg="white").grid(row=0, column=1)
+        for i in range(1,25):
+            l = tkinter.Label(frame, text="", font=f1,bg="white")
+            l.grid(row=i, column=0)
+            l.bind("<Double-Button-1>",self.select_time_bin)
+            tkinter.Label(frame, text="", font=f1,bg="white").grid(row=i, column=1)
+        frame.grid(row = 1,column=0)
+
+    def overtaking_pair_selected(self,event):
+        pair = event.widget.get(event.widget.curselection()[0])
+        pair = tuple([int(p) for p in pair.split("-")])
+        print("pair is",pair)
+        self.display_overtaking_data(pair)
+
+    def display_overtaking_data(self,pair):
+        self.overtakingTree.tag_configure("tree", font="courier 8")
+        f = tkinter.font.Font(family="courier", size=8)
+        #print(self.overtakingPairsDict)
+        try:
+            data = self.overtakingPairsDict[pair]["data"] # data is [dataframe,binnedData]
+            self.overtakingTree.delete(*self.overtakingTree.get_children())
+            #print("selected time bin is",self.overtakingPairsDict[pair]["selected"])
+            result = self.resampleOvertakingDataFunction(data[0],self.overtakingPairsDict[pair]["selected"])
+            #print("received results",result)
+            for item in result:
+                self.overtakingTree.insert("","end",values =item,tags=("tree",))
+            frame = self.nametowidget(self.winfo_children()[1])
+            labels = frame.winfo_children()
+            labelIndex = 2
+            for k,v in sorted(data[1].items()):
+                #print("label index",labelIndex,k,v)
+                self.nametowidget(labels[labelIndex]).configure(text=k,font = f)
+                self.nametowidget(labels[labelIndex + 1]).configure(text=v,font = f)
+                labelIndex+=2
+        except KeyError as e:
+            print("no key found",pair)
+
+    def select_time_bin(self,event):
+        frame = self.nametowidget(self.winfo_children()[0])
+        children = frame.winfo_children()
+        listBox = self.nametowidget(children[6])
+        pair = listBox.get(listBox.curselection()[0])
+        pair = tuple([int(p) for p in pair.split("-")])
+        print("selected pair is",pair)
+        try:
+            self.overtakingPairsDict[pair]["selected"] = event.widget.cget("text")
+            self.display_overtaking_data(pair)
+            parent = self.nametowidget(event.widget.winfo_parent())
+            for child in parent.winfo_children():
+                self.nametowidget(child).configure(bg="white")
+            event.widget.configure(bg="red")
+        except KeyError as e:
+            print(pair,"not found")
+
+        frame = self.nametowidget(self.winfo_children()[1])
+
+    def process_overtaking_pairs(self,listBox):
+        print("starting processing")
+        while True:
+            flag = False
+            print("no of rows in listbox",listBox.size())
+            for i in range(listBox.size()):
+                if listBox.itemcget(i, "bg") == "red":
+                    pair = listBox.get(i)
+                    pair = tuple([int(p) for p in pair.split("-")])
+                    print("processing row", i,"pair",pair)
+                    flag = True
+                    result = self.getOvertakingDataFunction(self.currentJob,pair)
+                    self.overtakingPairsDict[pair] = {}
+                    self.overtakingPairsDict[pair]["data"] = result
+                    self.overtakingPairsDict[pair]["selected"] = "23:59:59"
+                    listBox.itemconfig(i, bg="green")
+                    print("finished processing row",i)
+            if not flag:
+                self.processOvertakingThread = None
+                print("closing thread")
+                return
+
+    def add_overtaking_pair(self,event):
+        parent= event.widget.winfo_parent()
+        parent = self.nametowidget(parent)
+        children = parent.winfo_children()
+        mvmt1 = self.nametowidget(children[3]).get()
+        mvmt2 = self.nametowidget(children[5]) .get()
+        listBox = self.nametowidget(children[6])
+
+        listBox.insert(tkinter.END,mvmt1 + " - " + mvmt2)
+        listBox.itemconfig(listBox.size()-1,bg="red")
+        print(listBox.itemcget(listBox.size()-1,"bg"))
+        self.nametowidget(children[3]).delete(0,tkinter.END)
+        self.nametowidget(children[5]).delete(0, tkinter.END)
+        w = self.nametowidget(children[3])
+        w.focus()
+        if self.processOvertakingThread is None:
+            self.processOvertakingThread = threading.Thread(target=self.process_overtaking_pairs,args=(listBox,))
+            self.processOvertakingThread.start()
+        return "break"
 
     def spawn_cordon_screen(self):
         for child in self.winfo_children():
@@ -603,7 +744,6 @@ class mainWindow(tkinter.Tk):
         self.config(menu=self.menubar)
         frame = tkinter.Frame(self,  bg="white")
         f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
-        treefont = tkinter.font
         tkinter.Button(frame, text="Create new ANPR \nProject", bg="white", height=3,
                        command=self.spawn_parameters_window).grid(row=0, column=0, padx=20, pady=20)
         tkinter.Button(frame, text="Edit ANPR \nProject", width=17, height=3, bg="white",command=self.edit_job).grid(row=0, column=1, padx=20,
@@ -961,6 +1101,7 @@ class mainWindow(tkinter.Tk):
     def save_job(self):
         ###
         ### save the job details entered in the form, to the main job database
+        ### will also save an edited job
         ###
 
         ###
@@ -1025,6 +1166,8 @@ class mainWindow(tkinter.Tk):
             return
         job["folder"] = dir
         myDB.save_Job(data)
+        job = myDB.load_job(job["jobno"],job["jobname"],job["surveyDate"])
+        self.updateDataFunction(job)
         self.spawn_survey_setup_screen()
 
     def update_movement_window(self):
@@ -1142,7 +1285,7 @@ class mainWindow(tkinter.Tk):
                                                                                            padx=20, pady=20)
         tkinter.Button(frame, text="Route\nAssignment", width=17, height=3, bg="white",command=self.spawn_route_assignment_screen).grid(row=8, column=1,
                                                                                                      padx=20, pady=20)
-        tkinter.Button(frame, text="Overtaking", width=17, height=3, bg="white").grid(row=8, column=2, padx=20,
+        tkinter.Button(frame, text="Overtaking", width=17, height=3, bg="white",command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,
                                                                                              pady=20)
         tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=8, column=3, padx=20,
                                                                                       pady=20,sticky="e")
@@ -1904,6 +2047,7 @@ class mainWindow(tkinter.Tk):
     def load_job(self,event):
         inMov = []
         outMov = []
+        print(self.tree.selection()[0])
         jobname = self.tree.item(self.tree.selection()[0])
         self.currentJob = myDB.load_job(jobname["values"][0],jobname["values"][1],jobname["values"][2])
         title = self.currentJob["jobno"] + " " + self.currentJob["jobname"]
@@ -2021,8 +2165,12 @@ class mainWindow(tkinter.Tk):
             self.getRouteAssignmentFsLsFunction = fun
         if text == "get journey pairs":
             self.getJourneyPairsFunction = fun
-
-
+        if text == "get overtaking data":
+             self.getOvertakingDataFunction = fun
+        if text == "resample overtaking data":
+            self.resampleOvertakingDataFunction = fun
+        if text == "update data after job save":
+            self.updateDataFunction = fun
 
 def format_timedelta(td):
     minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
