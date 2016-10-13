@@ -13,7 +13,9 @@ import threading
 import os
 import myDB
 import pickle
+import subprocess
 import time
+import re
 
 
 class mainWindow(tkinter.Tk):
@@ -24,13 +26,14 @@ class mainWindow(tkinter.Tk):
         self.colourLabels = []
         self.entryValues = []
         self.revertButton = None
-        self.overtakingPairsDict = {}
+
         self.processOvertakingThread = None
         self.siteLabel = None
         self.box1Value = 0
         self.box2Value = 0 ### to keep track of the combo boxes on the comparison display sheet
-        self.durationsDictionary = None
-        self.selectedDuplicates = None
+        self.user = ""
+        self.recalcuatePlatooningfunction = None
+        self.platooningTime = 5
         self.getJourneyPairsFunction = None
         self.getOvertakingDataFunction = None
         self.getRouteAssignmentFsLsFunction = None
@@ -61,9 +64,15 @@ class mainWindow(tkinter.Tk):
         self.comparisonDataStructure = []
         self.configure(bg = "white")
         self.jobListBox = None
+
         self.currentJob = None
-        self.uneditedDataList = None
+        self.durationsDictionary = None
+        self.selectedDuplicates = None
         self.tempEditedDataStore  = []
+        self.overtakingPairsDict = {}
+        self.comparisonDataStructure = []
+        self.dataList=[]
+
         self.menubar = tkinter.Menu(self)
         menu = tkinter.Menu(self.menubar, tearoff=0)
         menu.add_command(label="Load TPs")
@@ -84,7 +93,7 @@ class mainWindow(tkinter.Tk):
         menu.add_command(label="l")
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
-        self.load_settings()
+        self.user,file=self.load_settings()
         self.spawn_survey_setup_screen()
 
     def get_cordon_data(self):
@@ -98,128 +107,263 @@ class mainWindow(tkinter.Tk):
         width = self.winfo_screenwidth() - 320
         height = self.winfo_screenheight() - 200
         f = tkinter.font.Font(family="helvetica", size=10)
+        vcmd = (self.register(self.validate_time_cell_input), "%d", "%s", "%S")
         frame = tkinter.Frame(self,bg="white")
         frame.grid(row=0,column=0,padx=20,pady=15)
-        tkinter.Label(frame, text=" Mvmt 1 ",bg="white").grid(row=0, column=0)
+        tkinter.Label(frame, text=" Mvmt 1",bg="white").grid(row=0, column=0)
         tkinter.Label(frame, text="  ",bg="white").grid(row=0, column=1)
-        tkinter.Label(frame, text=" Mvmt 2 ",bg="white").grid(row=0, column=2)
-        e =tkinter.Entry(frame,width=4,bg="white")
+        tkinter.Label(frame, text=" Mvmt 2",bg="white").grid(row=0, column=2)
+        e =tkinter.Entry(frame,width=4,bg="white",validate="key",validatecommand=vcmd)
         e.grid(row=1,column = 0)
         e.focus()
         tkinter.Label(frame,text = " - " ,bg="white").grid(row =1,column = 1)
-        e =tkinter.Entry(frame,width=4,bg="white")
+        e =tkinter.Entry(frame,width=4,bg="white",validate="key",validatecommand=vcmd)
         e.bind("<Return>",self.add_overtaking_pair)
         e.bind("<Tab>", self.add_overtaking_pair)
         e.grid(row=1, column=2)
         lbox =tkinter.Listbox(frame,bg= "white",font = f)
-        lbox.grid(row = 2,column=0,columnspan=3)
-        lbox.bind("<Double-Button-1>",self.overtaking_pair_selected)
+        lbox.grid(row = 2,column=0,columnspan=4)
+        lbox.configure(exportselection=False)
+        #lbox.bind("<Double-Button-1>",self.overtaking_pair_selected)
+        lbox.bind("<<ListboxSelect>>", self.display_overtaking_data)
+        tkinter.Label(frame, text=" Overtaking", bg="white").grid(row=0, column=4)
         cols = ["Time","No. of Vehicles","Average Duration","Average Speed","No. of Maneouvres","No. Overtaking","No. Overtaken"]
         self.overtakingTree = ttk.Treeview(frame,columns=cols,height=12,show="headings")
-        self.overtakingTree.grid(row = 2,rowspan = 3,column = 3,padx=20)
+        self.overtakingTree.grid(row = 1,rowspan = 4,column = 4,padx=20,pady=20,sticky="n")
         self.overtakingTree.heading(0, text="WERW")
         for i,c in enumerate(cols):
             self.overtakingTree.heading(i, text=c)
-            self.overtakingTree.column(i, width=130, anchor=tkinter.CENTER)
-        cols = ["Time Bin","No of Vehicles"]
-        self.binTree = ttk.Treeview(frame,columns=cols,height=24,show="headings")
-        #self.binTree.grid(row = 4,column=0,padx=20)
-        frame = tkinter.Frame(self,bg="white",relief=tkinter.GROOVE,borderwidth=2)
+            self.overtakingTree.column(i, width=100, anchor=tkinter.CENTER)
+        durationFrame = tkinter.Frame(frame,bg="white",relief=tkinter.GROOVE,borderwidth=2)
         f1 = tkinter.font.Font(family="helvetica", size=10)
-        tkinter.Label(frame,text = "Time Bin",font = f1,bg="white").grid(row = 0,column = 0)
-        tkinter.Label(frame, text="No of Vehicles", font=f1,bg="white").grid(row=0, column=1)
+        tkinter.Label(durationFrame,text = "Time Bin",font = f1,bg="white").grid(row = 0,column = 0)
+        tkinter.Label(durationFrame, text="No of Vehicles", font=f1,bg="white").grid(row=0, column=1)
         for i in range(1,25):
-            l = tkinter.Label(frame, text="", font=f1,bg="white")
+            l = tkinter.Label(durationFrame, text="", font=f1,bg="white")
             l.grid(row=i, column=0)
             l.bind("<Double-Button-1>",self.select_time_bin)
-            tkinter.Label(frame, text="", font=f1,bg="white").grid(row=i, column=1)
-        frame.grid(row = 1,column=0)
+            tkinter.Label(durationFrame, text="", font=f1,bg="white").grid(row=i, column=1)
+        durationFrame.grid(row = 3,column=0,columnspan=3,pady=20)
+        tkinter.Button(frame, text="Back", command=self.spawn_home_window, font=f,width=10).grid(row=4, column=0,columnspan=3, padx=20,pady=20)
 
-    def overtaking_pair_selected(self,event):
-        pair = event.widget.get(event.widget.curselection()[0])
+
+        cols = ["Time", "2", "3", "4", "5","6", "7", "8", "9", "10", "11+"]
+
+        platooningFrame = tkinter.Frame(self,bg="white")
+        self.platoonTree1 = ttk.Treeview(platooningFrame,columns=cols,height=14,show="headings")
+        self.platoonTree2 = ttk.Treeview(platooningFrame, columns=cols, height=14, show="headings")
+        tkinter.Label(platooningFrame,text= "Platooning",bg="white").grid(row=0,column=0,columnspan=2,pady = 10)
+        tkinter.Label(platooningFrame, text="Time = ", bg="white").grid(row=1, column=0, pady=10,sticky="e")
+        e =tkinter.Entry(platooningFrame, text="5",width=4, bg="white", validate="key", validatecommand=vcmd)
+        e.grid(row=1,column=1,sticky="w")
+        e.insert(tkinter.END,"5")
+        e.bind("<Return>",self.recalculate_platooning_data)
+        e.bind("<Tab>", self.recalculate_platooning_data)
+        e.bind("<FocusOut>", self.recalculate_platooning_data)
+        for i, c in enumerate(cols):
+            self.platoonTree1.heading(c, text=c)
+            self.platoonTree1.column(c, width=50, anchor=tkinter.CENTER)
+            self.platoonTree2.heading(c, text=c)
+            self.platoonTree2.column(c, width=50, anchor=tkinter.CENTER)
+        self.platoonTree1.column("Time", width=100, anchor=tkinter.CENTER)
+        self.platoonTree2.column("Time", width=100, anchor=tkinter.CENTER)
+        self.platoonTree1.grid(row=2,column=0,columnspan=2,padx=20,pady=20)
+        self.platoonTree2.grid(row=3, column=0,columnspan=2,padx=20,pady=20)
+        platooningFrame.grid(row =0,column=6,sticky="n")
+
+    def recalculate_platooning_data(self,event):
+        ###
+        ### get the data relating to the pair parameter, and display it in the treeview
+        ###
+
+        ###
+        ### find the selected movment pair
+        ###
+        frame = self.nametowidget(self.winfo_children()[0])
+        children = frame.winfo_children()
+        listBox = self.nametowidget(children[6])
+        print("curselection is", listBox.curselection())
+        pair = listBox.get(listBox.curselection()[0])
         pair = tuple([int(p) for p in pair.split("-")])
-        print("pair is",pair)
-        self.display_overtaking_data(pair)
+        print("pair is", pair)
 
-    def display_overtaking_data(self,pair):
-        self.overtakingTree.tag_configure("tree", font="courier 8")
-        f = tkinter.font.Font(family="courier", size=8)
-        #print(self.overtakingPairsDict)
+        ###
+        ### find the entry box for the platooning time
+        ###
+        frame = self.nametowidget(self.winfo_children()[1])
+        e = self.nametowidget(frame.winfo_children()[4])
         try:
-            data = self.overtakingPairsDict[pair]["data"] # data is [dataframe,binnedData]
+            platooningTime = int(e.get())
+        except ValueError as e:
+            platooningTime = 5
+        try:
+            if platooningTime != self.overtakingPairsDict[pair]["platooningTime"]:
+                self.overtakingPairsDict[pair]["platooningTime"] = platooningTime
+                self.overtakingPairsDict[pair]["data"][3] = self.recalcuatePlatooningfunction(self.currentJob, pair[0], platooningTime)
+                self.overtakingPairsDict[pair]["data"][4] = self.recalcuatePlatooningfunction(self.currentJob, pair[1], platooningTime)
+            self.display_overtaking_data(None)
+        except KeyError as e:
+            print("no pair",pair)
+
+    def display_overtaking_data(self,event):
+        ###
+        ### display the previously retrieved data for a movement pair, selected by clicking in the list box
+        ###
+
+        ###
+        ### find the movement pair
+        ###
+
+        if event is None:
+            frame = self.nametowidget(self.winfo_children()[0])
+            children = frame.winfo_children()
+            listBox = self.nametowidget(children[6])
+            print("curselection is", listBox.curselection())
+            pair = listBox.get(listBox.curselection()[0])
+            pair = tuple([int(p) for p in pair.split("-")])
+            print("pair is", pair)
+        else:
+            print("curselection is",event.widget.curselection())
+            pair = event.widget.get(event.widget.curselection()[0])
+            pair = tuple([int(p) for p in pair.split("-")])
+            print("pair is", pair)
+
+
+        ###
+        ### find the entry box for the platooning time
+        ###
+        frame = self.nametowidget(self.winfo_children()[1])
+        e = self.nametowidget(frame.winfo_children()[4])
+
+
+        self.overtakingTree.tag_configure("tree", font="courier 8")
+        self.platoonTree1.tag_configure("tree", font="courier 8")
+        self.platoonTree2.tag_configure("tree", font="courier 8")
+        self.platoonTree1.tag_configure("total", font="helvetica 8",foreground="red")
+        self.platoonTree2.tag_configure("total", font="helvetica 8", foreground="red")
+        f = tkinter.font.Font(family="courier", size=8)
+        try:
+            data = self.overtakingPairsDict[pair]["data"] # data is [dataframe,binnedData,overtakingData,platoon1,platoon2]
+            e.delete(0,tkinter.END)
+            e.insert(0,self.overtakingPairsDict[pair]["platooningTime"])
             self.overtakingTree.delete(*self.overtakingTree.get_children())
-            #print("selected time bin is",self.overtakingPairsDict[pair]["selected"])
-            result = self.resampleOvertakingDataFunction(data[0],self.overtakingPairsDict[pair]["selected"])
-            #print("received results",result)
-            for item in result:
+            for item in data[2]:
                 self.overtakingTree.insert("","end",values =item,tags=("tree",))
-            frame = self.nametowidget(self.winfo_children()[1])
+            frame = self.nametowidget(self.winfo_children()[0])
+            frame = self.nametowidget(frame.winfo_children()[9])
             labels = frame.winfo_children()
-            labelIndex = 2
+            labelIndex = 2 ### because we want to start at the 3rd label
             for k,v in sorted(data[1].items()):
-                #print("label index",labelIndex,k,v)
-                self.nametowidget(labels[labelIndex]).configure(text=k,font = f)
-                self.nametowidget(labels[labelIndex + 1]).configure(text=v,font = f)
+                if k == self.overtakingPairsDict[pair]["selected"]:
+                    self.nametowidget(labels[labelIndex]).configure(text=k, font=f, bg="red")
+                else:
+                    self.nametowidget(labels[labelIndex]).configure(text=k,font = f,bg="white")
+                self.nametowidget(labels[labelIndex + 1]).configure(text=v,font = f,bg="white")
                 labelIndex+=2
+            self.platoonTree1.delete(*self.platoonTree1.get_children())
+            self.platoonTree2.delete(*self.platoonTree2.get_children())
+            for item in data[3][:-1]:
+                self.platoonTree1.insert("", "end", values=item, tags=("tree",))
+            self.platoonTree1.insert("", "end", values=data[3][-1], tags=("total",))
+            for item in data[4][:-1]:
+                self.platoonTree2.insert("", "end", values=item, tags=("tree",))
+            self.platoonTree2.insert("", "end", values=data[4][-1], tags=("total",))
         except KeyError as e:
             print("no key found",pair)
 
     def select_time_bin(self,event):
+        ###
+        ### user has selected the time parameter to use to exclude any runs with time greater
+        ### than the selected time. We set the "selected" entry of the dictionary to the selected time
+        ### and then run display_overtaking_data to display the updated data.
+        ###
+
         frame = self.nametowidget(self.winfo_children()[0])
         children = frame.winfo_children()
         listBox = self.nametowidget(children[6])
+        if len(listBox.curselection()) == 0:
+            messagebox.showinfo(message="Please select a movement pair from the list box")
+            return
         pair = listBox.get(listBox.curselection()[0])
         pair = tuple([int(p) for p in pair.split("-")])
-        print("selected pair is",pair)
         try:
             self.overtakingPairsDict[pair]["selected"] = event.widget.cget("text")
-            self.display_overtaking_data(pair)
+            self.overtakingPairsDict[pair]["data"][2] = self.resampleOvertakingDataFunction(self.currentJob, self.overtakingPairsDict[pair]["data"][0],self.overtakingPairsDict[pair]["selected"], pair)
+
             parent = self.nametowidget(event.widget.winfo_parent())
             for child in parent.winfo_children():
                 self.nametowidget(child).configure(bg="white")
             event.widget.configure(bg="red")
+            self.display_overtaking_data(None)
         except KeyError as e:
             print(pair,"not found")
 
-        frame = self.nametowidget(self.winfo_children()[1])
-
     def process_overtaking_pairs(self,listBox):
+        ###
+        ### this function runs in a separate thread from the main thread. This allows the user to enter
+        ### new journey pairs while processing any previously entered pairs.
+        ###
+
+
+        ###
+        ### find the entry box for the platooning time
+        ###
+        frame = self.nametowidget(self.winfo_children()[1])
+        e = self.nametowidget(frame.winfo_children()[4])
+        try:
+            platooningTime = int(e.get())
+        except ValueError as e:
+            platooningTime = 5
+
+
         print("starting processing")
         while True:
             flag = False
-            print("no of rows in listbox",listBox.size())
             for i in range(listBox.size()):
                 if listBox.itemcget(i, "bg") == "red":
                     pair = listBox.get(i)
                     pair = tuple([int(p) for p in pair.split("-")])
-                    print("processing row", i,"pair",pair)
                     flag = True
-                    result = self.getOvertakingDataFunction(self.currentJob,pair)
                     self.overtakingPairsDict[pair] = {}
-                    self.overtakingPairsDict[pair]["data"] = result
                     self.overtakingPairsDict[pair]["selected"] = "23:59:59"
-                    listBox.itemconfig(i, bg="green")
-                    print("finished processing row",i)
+                    self.overtakingPairsDict[pair]["platooningTime"] = platooningTime
+                    result = self.getOvertakingDataFunction(self.currentJob,pair)
+                    platoon1=self.recalcuatePlatooningfunction(self.currentJob,pair[0],platooningTime)
+                    platoon2 = self.recalcuatePlatooningfunction(self.currentJob, pair[1], platooningTime)
+                    overtaking = self.resampleOvertakingDataFunction(self.currentJob,result[0],self.overtakingPairsDict[pair]["selected"],pair)
+                    result.append(overtaking)
+                    result.append(platoon1)
+                    result.append(platoon2)
+                    self.overtakingPairsDict[pair]["data"] = result
+                    listBox.itemconfig(i, bg="light green")
             if not flag:
                 self.processOvertakingThread = None
                 print("closing thread")
                 return
 
     def add_overtaking_pair(self,event):
+        ###
+        ### the user has entered a new journey pair into the entry boxes, and added it to the list box for processing
+        ### we start up a new thread to process the entered journey pair
+        ###
+
         parent= event.widget.winfo_parent()
         parent = self.nametowidget(parent)
         children = parent.winfo_children()
         mvmt1 = self.nametowidget(children[3]).get()
         mvmt2 = self.nametowidget(children[5]) .get()
+        self.nametowidget(children[3]).delete(0, tkinter.END)
+        self.nametowidget(children[5]).delete(0, tkinter.END)
+        w = self.nametowidget(children[3])
+        w.focus()
+        if mvmt1 == "" or mvmt2=="":
+            return "break"
         listBox = self.nametowidget(children[6])
 
         listBox.insert(tkinter.END,mvmt1 + " - " + mvmt2)
         listBox.itemconfig(listBox.size()-1,bg="red")
-        print(listBox.itemcget(listBox.size()-1,"bg"))
-        self.nametowidget(children[3]).delete(0,tkinter.END)
-        self.nametowidget(children[5]).delete(0, tkinter.END)
-        w = self.nametowidget(children[3])
-        w.focus()
+
+
         if self.processOvertakingThread is None:
             self.processOvertakingThread = threading.Thread(target=self.process_overtaking_pairs,args=(listBox,))
             self.processOvertakingThread.start()
@@ -307,7 +451,8 @@ class mainWindow(tkinter.Tk):
 
         frame=tkinter.Frame(win)
         tkinter.Label(frame,text = "Base duration").grid(row=0,column=0)
-        e =tkinter.Entry(frame)
+        vcmd = (self.register(self.validate_time_cell_input), "%d", "%s", "%S")
+        e =tkinter.Entry(frame, validate="key", validatecommand=vcmd)
         e.grid(row=0,column=1)
         tkinter.Button(frame, text="Fill", command=lambda: self.fill_duration_matrix(e, [canvas,leftCanvas,topCanvas])).grid(row=0, column=2)
 
@@ -336,9 +481,41 @@ class mainWindow(tkinter.Tk):
         self.draw_duration_matrix_screen([canvas,leftCanvas,topCanvas])
 
     def fill_duration_matrix(self,e,canvas):
-        for k,v in self.durationsDictionary.items():
-                self.durationsDictionary[k] = e.get()
-        self.draw_duration_matrix_screen(canvas)
+        text = e.get()
+        if text.strip() == "":
+            return
+        text = self.validate_text_to_hhmm(text)
+        if text != "":
+            e.delete(0, tkinter.END)
+            for k,v in self.durationsDictionary.items():
+                    self.durationsDictionary[k] = text
+            self.draw_duration_matrix_screen(canvas)
+        else:
+            messagebox.showinfo(message=e.get() + " is not a valid time")
+            e.delete(0, tkinter.END)
+
+    def validate_text_to_hhmm(self,text):
+        if len(text) > 5:
+            return ""
+        elif len(text) == 1:
+            if not text.isdigit():
+                return ""
+            text = "0" + text + ":00"
+        elif len(text) == 2:
+            if not text.isdigit():
+                return ""
+            text = text + ":00"
+        elif len(text) == 3 and text[-1] == ":":
+            if not text[:-1].isdigit():
+                return ""
+            text = text + "00"
+        elif len(text) == 4:
+            text = text + "0"
+        hours = text.split(":")[0]
+        mins = text.split(":")[1]
+        if int(hours) > 23 or int(mins) > 60:
+            return ""
+        return text
 
     def draw_duration_matrix_screen(self,canvas):
         leftCanvas = canvas[1]
@@ -363,7 +540,7 @@ class mainWindow(tkinter.Tk):
         if self.durationsDictionary is None:
             self.durationsDictionary = {}
             try:
-                with open(self.currentJob["folder"] + "/durations.pkl","rb") as f:
+                with open(self.currentJob["folder"] + "/data/durations.pkl","rb") as f:
                     self.durationsDictionary=pickle.load(f)
             except IOError as e:
                 print(e)
@@ -373,7 +550,7 @@ class mainWindow(tkinter.Tk):
                     for o in outMov:
                         self.durationsDictionary[i, o] = "00:30:00"
         self.currentJob["durationsDictionary"]=self.durationsDictionary
-        with open(self.currentJob["folder"] + "/durations.pkl","wb") as f:
+        with open(self.currentJob["folder"] + "/data/durations.pkl","wb") as f:
             pickle.dump(self.durationsDictionary,f)
         columnWidth = 50
         rowHeight = 30
@@ -485,10 +662,6 @@ class mainWindow(tkinter.Tk):
         print("clicked at",x,y)
         top,bottom = canvas[0].yview()
         left,right = canvas[0].xview()
-        print(top,bottom,left,right)
-
-
-        print("canvas size is",canvas[0].winfo_width(),canvas[0].winfo_height())
         inMov = []
         outMov = []
         for site, details in self.currentJob["sites"].items():
@@ -505,33 +678,41 @@ class mainWindow(tkinter.Tk):
         noOfRows = len(inMov)
         x_offset = left * (columnWidth ) * noOfCols
         y_offset = top * (rowHeight ) * noOfRows
-        print("offset are", x_offset, y_offset)
+        #print("offset are", x_offset, y_offset)
         #x_offset, y_offset = x_offset - (10 + columnWidth), y_offset - (20 + rowHeight)
-        print("offset are", x_offset, y_offset)
+        #print("offset are", x_offset, y_offset)
         if x > noOfCols * columnWidth or y > noOfRows*rowHeight:
             print("outside matrix")
             return
         x,y = int((x + x_offset)/columnWidth),int((y + y_offset)/rowHeight)
-        print("adjusted x y is",x,y)
         win=tkinter.Toplevel()
         win.wm_title("in " + str(inMov[y]) + " - out " + str(outMov[x]))
         frame = tkinter.Frame(win)
         tkinter.Label(frame,text="Enter Duration").grid(row=0,column=0)
-        e =tkinter.Entry(frame)
+        vcmd = (self.register(self.validate_time_cell_input), "%d", "%s", "%S")
+        e =tkinter.Entry(frame,validate="key",validatecommand=vcmd)
         e.grid(row=0,column=1)
         tkinter.Button(frame,text="Save",command=lambda :self.save_duration_matrix(e,win,canvas)).grid(row=0,column=2)
         frame.grid(row=0,column=0)
         e.insert(0,self.durationsDictionary[inMov[y],outMov[x]])
 
     def save_duration_matrix(self,e,win,canvas):
-        print(e.get(),win.title())
-        temp = win.title().split("-")
-        i,o= temp[0],temp[1]
-        i = int(i.replace("in","").strip())
-        o = int(o.replace("out", "").strip())
-        self.durationsDictionary[i,o]=e.get()
-        self.draw_duration_matrix_screen(canvas)
-        win.destroy()
+
+        text = e.get()
+        if text.strip() == "":
+            return
+        text = self.validate_text_to_hhmm(text)
+        if text != "":
+            temp = win.title().split("-")
+            i,o= temp[0],temp[1]
+            i = int(i.replace("in","").strip())
+            o = int(o.replace("out", "").strip())
+            self.durationsDictionary[i,o]=text
+            self.draw_duration_matrix_screen(canvas)
+            win.destroy()
+        else:
+            messagebox.showinfo(message=e.get() + " is not a valid time")
+            e.delete(0,tkinter.END)
 
     def get_non_directional_route_assignment_fs_ls_data(self):
         inMov = []
@@ -581,9 +762,9 @@ class mainWindow(tkinter.Tk):
         data = self.getCordonFunction(self.currentJob)
         for site, details in self.currentJob["sites"].items():
             for mvmtNo, mvmt in details.items():
-                if mvmt["dir"] == 1:
+                if mvmt["dir"] == 1 or mvmt["dir"] == 3:
                     inMov.append(mvmt["newmovement"])
-                if mvmt["dir"] == 2:
+                if mvmt["dir"] == 2 or mvmt["dir"] == 3:
                     outMov.append(mvmt["newmovement"])
         inMov = sorted(inMov)
         outMov = sorted(outMov)
@@ -748,9 +929,9 @@ class mainWindow(tkinter.Tk):
                        command=self.spawn_parameters_window).grid(row=0, column=0, padx=20, pady=20)
         tkinter.Button(frame, text="Edit ANPR \nProject", width=17, height=3, bg="white",command=self.edit_job).grid(row=0, column=1, padx=20,
                                                                                          pady=20)
-        tkinter.Button(frame, text="Duplicate ANPR \nProject", width=17, height=3, bg="white").grid(row=0, column=2, padx=20,
-                                                                                         pady=20)
-        tkinter.Button(frame, text="Delete ANPR \nProject", width=17, height=3, bg="white",command=self.delete_job).grid(row=0, column=3, padx=20,
+        #tkinter.Button(frame, text="Duplicate ANPR \nProject", width=17, height=3, bg="white").grid(row=0, column=2, padx=20,
+                                                                                         #pady=20)
+        tkinter.Button(frame, text="Delete ANPR \nProject", width=17, height=3, bg="white",command=self.delete_job).grid(row=0, column=2, padx=20,
                                                                                          pady=20)
         frame.grid(row=0, column=0,pady=(100,0),padx=(120,0))
         frame = tkinter.Frame(self, bg="white")
@@ -814,7 +995,7 @@ class mainWindow(tkinter.Tk):
         ###
         ### set up mid left frame
         ###
-        vcmd = (self.register(self.validate_numeric),"%d", "%s","%S")
+        vcmd = (self.register(self.validate_time_cell_input),"%d", "%s","%S")
         frame = tkinter.Frame(outerFrame,width=330,height=350,bg = "white",relief=tkinter.GROOVE,borderwidth=2)
         frame.grid_propagate(False)
         tkinter.Label(frame, text="From", bg="white").grid(row=0, column=1, pady=10, padx=5)
@@ -846,9 +1027,10 @@ class mainWindow(tkinter.Tk):
 
         frame = tkinter.Frame(outerFrame, width=330,height =60, bg="white", relief=tkinter.GROOVE, borderwidth=2)
         frame.grid_propagate(False)
+        vcmd = (self.register(self.validate_is_numeric_only), "%d", "%s", "%S")
         tkinter.Label(frame, text="No of Cameras", bg="white").grid(row=0, column=0, pady=10, padx=10, sticky="e")
         self.entryValues.append(tkinter.StringVar())
-        tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1], bg="white").grid(row=0, column=1, pady=10,
+        tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd).grid(row=0, column=1, pady=10,
                                                                                            padx=0, sticky="w")
         tkinter.Button(frame,text = "Update",height =1,command = self.update_movement_window).grid(row=0,column=2,padx=10)
         frame.grid(row=2,column=0,sticky="nw", padx=(100, 10))
@@ -1031,11 +1213,19 @@ class mainWindow(tkinter.Tk):
             messagebox.showinfo(message=text + " isnt a valid date, must be in format dd/mm/yy")
             event.widget.delete(0,tkinter.END)
 
-    def validate_numeric(self,action,text,char):
+    def validate_is_numeric_only(self,action,text,char):
+        if action == "0":  ### action 0 is delete. We dont mind what they delete
+            return True
+        return char.isdigit()
+
+    def validate_time_cell_input(self,action,text,char):
         ###
-        ### validate that only numbers, or a colon, can be entered in the cells for the project times on the project setup screen
+        ### validate that only numbers, or a colon, or a correct time can be entered in the cells for the project times on the project setup screen
         ###
 
+        pattern  = re.compile("[0-9][0-9]:[0-9][0-9]")
+        if len(text) == 0 and pattern.match(char):
+            return True
         if action == "0": ### action 0 is delete. We dont mind what they delete
             return True
         if len(text) ==5:### dont allow any string greater than length 5
@@ -1050,58 +1240,22 @@ class mainWindow(tkinter.Tk):
     def validate_hhmm(self,event):
         ###
         ### validate the user input for the project times on the project setup screen, when the input widget loses focus.
-        ### if the user enters only 1 number, the rest is filled in. Eg they enter 4, the value of cell is 04:00
-        ### similarly with 2 numbers, :00 is added to the end
         ###
+
         text = event.widget.get()
         if text.strip() == "":
             return
-        if len(text) > 5:
-            event.widget.delete(0, tkinter.END)
-            messagebox.showinfo(message="not a valid time")
-            return
-
-        elif len(text) == 1:
-            if not text.isdigit():
-                event.widget.delete(0,tkinter.END)
-                messagebox.showinfo(message="not a valid time")
-                return
-            event.widget.insert(0,0)
-            event.widget.insert(tkinter.END, ":00")
-        elif len(text) == 2:
-            if not text.isdigit():
-                event.widget.delete(0, tkinter.END)
-                messagebox.showinfo(message="not a valid time")
-                return
-            event.widget.insert(tkinter.END,":00")
-        elif len(text) == 3 and text[-1] == ":":
-            if not text[:-1].isdigit():
-                event.widget.delete(0, tkinter.END)
-                messagebox.showinfo(message="not a valid time")
-                return
-            event.widget.delete(len(text)-1,tkinter.END)
-            event.widget.insert(tkinter.END, ":00")
-        elif ":" not in text:
-            event.widget.delete(0, tkinter.END)
-            messagebox.showinfo(message="not a valid time")
-            return
-
-        t = event.widget.get()
-        hours = t.split(":")[0]
-        mins = t.split(":")[1]
-        if int(hours) > 23 or int(mins) > 60:
-            event.widget.delete(0, tkinter.END)
-            messagebox.showinfo(message="not a valid time")
-            return
-        if len(mins) == 1:
-            event.widget.insert(tkinter.END,"0")
-        if len(hours) == 1:
-            event.widget.insert(0, "0")
+        text = self.validate_text_to_hhmm(text)
+        print("text is - ",text)
+        event.widget.delete(0,tkinter.END)
+        event.widget.insert(0,text)
+        return "break"
 
     def save_job(self):
         ###
         ### save the job details entered in the form, to the main job database
         ### will also save an edited job
+        ### checking of data is done here before saving
         ###
 
         ###
@@ -1111,13 +1265,24 @@ class mainWindow(tkinter.Tk):
         job["jobno"] = self.entryValues[0].get()
         job["jobname"]=self.entryValues[1].get()
         job["surveyDate"]= self.entryValues[2].get()
-        if self.entryValues[3].get()=="" or  self.entryValues[4].get() == "":
+
+        for i in range(3,11,2):
+            try:
+                d = datetime.datetime.strptime(self.entryValues[i].get(),"%H:%M")
+                d1 = datetime.datetime.strptime(self.entryValues[i+1].get(), "%H:%M")
+                if d >= d1:
+                    messagebox.showinfo(message="You have entered a pair of times where\n the start time is equal to or after the end time.\n no data saved")
+                    return False
+                ### TODO: verify end time is after start time, verify that if one is filled, the other is filled
+            except Exception as e:
+                self.entryValues[i].set("")
+                self.entryValues[i+1].set("")
+
+        if self.entryValues[3].get() == "" or self.entryValues[4].get() == "":
             messagebox.showinfo(message="You must enter at least one time period")
             return
-        else:
-            ### TODO: verify end time is after start time, verify that if one is filled, the other is filled
 
-            job["timeperiod1"] = self.entryValues[3].get() + "-" + self.entryValues[4].get()
+        job["timeperiod1"] = self.entryValues[3].get() + "-" + self.entryValues[4].get()
         job["timeperiod2"] = self.entryValues[5].get() + "-" + self.entryValues[6].get()
         job["timeperiod3"] = self.entryValues[7].get() + "-" + self.entryValues[8].get()
         job["timeperiod4"] = self.entryValues[9].get() + "-" + self.entryValues[10].get()
@@ -1160,12 +1325,11 @@ class mainWindow(tkinter.Tk):
         ### prompt the user to select the location for storing any files and data produced by the software
         ###
 
-        dir = filedialog.askdirectory(title="Please select Project Location",initialdir="S:\\SCOTLAND DRIVE 2\\JOB FOLDERS\\")
-        if dir == "":
-            messagebox.showinfo(message="No Project Location selected, project not saved")
+
+        result = myDB.save_Job(data,self.user)
+        if result == False:
+            print("failed to save to db")
             return
-        job["folder"] = dir
-        myDB.save_Job(data)
         job = myDB.load_job(job["jobno"],job["jobname"],job["surveyDate"])
         self.updateDataFunction(job)
         self.spawn_survey_setup_screen()
@@ -1196,13 +1360,14 @@ class mainWindow(tkinter.Tk):
         ###
 
         scrollframe = VerticalScrolledFrame(self.movementsFrame,bg="beige")
+        vcmd = (self.register(self.validate_is_numeric_only), "%d", "%s", "%S")
         for i in range(count):
             self.entryValues.append(tkinter.StringVar())
-            tkinter.Entry(scrollframe.interior,textvariable=self.entryValues[-1],width = 5).grid(row=i,column = 0, padx=(25,0))
+            tkinter.Entry(scrollframe.interior,textvariable=self.entryValues[-1],width = 5,validate="key",validatecommand=vcmd).grid(row=i,column = 0, padx=(25,0))
             self.entryValues.append(tkinter.StringVar())
             tkinter.Entry(scrollframe.interior, textvariable=self.entryValues[-1],width = 8).grid(row=i, column=1, padx=(60,0))
             self.entryValues.append(tkinter.StringVar())
-            tkinter.Entry(scrollframe.interior, textvariable=self.entryValues[-1], width=5).grid(row=i, column=3,padx=(150,10))
+            tkinter.Entry(scrollframe.interior, textvariable=self.entryValues[-1], width=5,validate="key",validatecommand=vcmd).grid(row=i, column=3,padx=(150,10))
             tkinter.Label(scrollframe.interior, text=str(i + 1),bg="white").grid(row=i, column=2, padx=(70,10))
             self.entryValues.append(tkinter.IntVar())
             tkinter.Radiobutton(scrollframe.interior,text = "In",variable=self.entryValues[-1],value=1,bg="white").grid(row=i,column = 4,padx=(50,0))
@@ -1261,7 +1426,7 @@ class mainWindow(tkinter.Tk):
         f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
         d = datetime.datetime.strftime(self.currentJob["surveydate"],"%d/%m/%y")
         tkinter.Label(frame, text=self.currentJob["jobno"] + " " + self.currentJob["jobname"]+ " " + d , bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=0, column=2,columnspan = 10,ipadx =30,pady = (10,30))
-        tkinter.Button(frame,image=self.img).grid(row=0,column=14,padx=10,pady = (10,30))
+        tkinter.Button(frame,image=self.img,command=self.open_project_folder).grid(row=0,column=14,padx=10,pady = (10,30))
         tkinter.Label(frame,text = "Overviews", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=1,column = 0,ipadx =30)
         tkinter.Button(frame, text="Create Overview \nCount Template", width=17, bg="white", height=3,
                        command=self.export_OVTemplate).grid(row=2, column=0, padx=20, pady=20)
@@ -1285,13 +1450,18 @@ class mainWindow(tkinter.Tk):
                                                                                            padx=20, pady=20)
         tkinter.Button(frame, text="Route\nAssignment", width=17, height=3, bg="white",command=self.spawn_route_assignment_screen).grid(row=8, column=1,
                                                                                                      padx=20, pady=20)
-        tkinter.Button(frame, text="Overtaking", width=17, height=3, bg="white",command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,
+        tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,
                                                                                              pady=20)
         tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=8, column=3, padx=20,
                                                                                       pady=20,sticky="e")
         tkinter.Button(frame, text="Back", width=10, height=1, bg="white",command = self.spawn_survey_setup_screen).grid(row=9, column=0, padx=20,
                                                                                       pady=20)
         frame.grid(row=0, column=0, pady=(120, 0), padx=(320, 0))
+
+    def open_project_folder(self):
+        p = os.path.normpath(self.currentJob["folder"])
+        # subprocess.Popen(r'explorer /n /select,"C:\Users\NWatson\Desktop\Oxford ANPR testing"' )
+        subprocess.Popen('explorer "{0}"'.format(p))
 
     def comment_clicked(self,event):
         curItem = event.widget.identify_row(event.y)
@@ -1316,11 +1486,11 @@ class mainWindow(tkinter.Tk):
         e = tkinter.Entry(win,width = 20,font = f)
         e.grid( row=0,column=1,padx=10,pady=10)
         tkinter.Label(win,text="Please Select Database file",font = f).grid(row=1, column=0,padx=10,pady=10)
-        l = tkinter.Label(win,text="None",font = f,width = 40)
+        l = tkinter.Label(win,text="None",font = f,width = 40,wraplength=280,justify=tkinter.CENTER)
         l.grid(row=1, column=1,padx=10,pady=10)
-        name,file = self.load_settings()
+        self.user,file = self.load_settings()
         e.delete(0, tkinter.END)
-        e.insert(0, name)
+        e.insert(0, self.user)
         l.configure(text=file)
         tkinter.Button(win,text = "Select",font = f,command=lambda:self.get_database_file_location(l)).grid(row=1,column=2,padx=10,pady=10)
         tkinter.Button(win, text="Save", font=f,command=lambda:self.save_settings(e,l,win)).grid(row=2, column=2,padx=10,pady=10)
@@ -1337,6 +1507,7 @@ class mainWindow(tkinter.Tk):
         f = open("settings.txt","w")
         f.write(name + "\n")
         f.write(file+ "\n")
+        self.user = name
         self.destroy__window(win)
 
     def load_settings(self):
@@ -1607,8 +1778,6 @@ class mainWindow(tkinter.Tk):
         ###
         index = self.movementBox.current()
         values = self.movementBox.cget("values")
-        print("movements are",len(values),values)
-        print("value is",self.movementBox.get())
         if dir=="left":
             if index >0:
                 self.movementBox.current(index-1)
@@ -1616,7 +1785,6 @@ class mainWindow(tkinter.Tk):
         else:
             if index<len(values)-1:
                 self.movementBox.current(index + 1)
-                print("after,value is", self.movementBox.get())
                 self.movementBox.event_generate("<<ComboboxSelected>>", when="tail")
 
     def edit_cell(self,event):
@@ -1686,11 +1854,11 @@ class mainWindow(tkinter.Tk):
         ### dataindex gives us the index of the ANPR data
         ###
         print("selected boxes",(self.box1Value, self.box2Value))
-        print("site",selectedSite["siteNo"],"movement",self.currentSelected[1])
+        #print("site",selectedSite["siteNo"],"movement",self.currentSelected[1])
         for item in movement["data"]:
             print(item)
         displayedData=[movement["data"][1],movement["data"][dataIndex]]
-        print("we are actually displaying index",dataIndex)
+        #print("we are actually displaying index",dataIndex)
         print(displayedData)
         for index,block in enumerate(displayedData):
             vars = self.comparisonDataStructure[index]
@@ -1964,7 +2132,9 @@ class mainWindow(tkinter.Tk):
             OVrow = row[1:]
             ANPRrow = ANPRdata[i][1:]
             timestamp = row[0]
+            print("ANPRrow is",ANPRrow)
             for index, item in enumerate(ANPRrow[:-1]):
+                print(index,item)
                 cl = ANPRClasses[index]
                 total = int(sum([OVrow[j] for j in ANPRtoOVdict[cl]]))
                 if total == 0:
@@ -2047,6 +2217,13 @@ class mainWindow(tkinter.Tk):
     def load_job(self,event):
         inMov = []
         outMov = []
+        self.currentJob = None
+        self.durationsDictionary = None
+        self.selectedDuplicates = None
+        self.tempEditedDataStore = []
+        self.overtakingPairsDict = {}
+        self.comparisonDataStructure = []
+        self.dataList = []
         print(self.tree.selection()[0])
         jobname = self.tree.item(self.tree.selection()[0])
         self.currentJob = myDB.load_job(jobname["values"][0],jobname["values"][1],jobname["values"][2])
@@ -2055,14 +2232,14 @@ class mainWindow(tkinter.Tk):
         if not self.loadJobFunction(self.currentJob):
             return
         try:
-            with open(self.currentJob["folder"] + "/durations.pkl", "rb") as f:
+            with open(self.currentJob["folder"] + "/data/durations.pkl", "rb") as f:
                 self.durationsDictionary = pickle.load(f)
         except IOError as e:
             startTime = self.currentJob["timeperiod1"].split("-")[0]
             endTime = self.currentJob["timeperiod1"].split("-")[1]
             for i in range(2,5):
                 if self.currentJob["timeperiod" + str(i)].split("-")[1] != "":
-                    endTime = self.currentJob["timeperiod" + i].split("-")[1]
+                    endTime = self.currentJob["timeperiod" + str(i)].split("-")[1]
             print(startTime,endTime)
 
             t = datetime.datetime.strptime(startTime, "%H:%M")
@@ -2082,6 +2259,8 @@ class mainWindow(tkinter.Tk):
                 for o in outMov:
                     self.durationsDictionary[i,o] =t
         self.currentJob["durationsDictionary"] = self.durationsDictionary
+        with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
+            pickle.dump(self.durationsDictionary, f)
         self.spawn_home_window()
 
     def delete_job(self):
@@ -2171,6 +2350,8 @@ class mainWindow(tkinter.Tk):
             self.resampleOvertakingDataFunction = fun
         if text == "update data after job save":
             self.updateDataFunction = fun
+        if text == "recalculate platooning":
+            self.recalcuatePlatooningfunction = fun
 
 def format_timedelta(td):
     minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
@@ -2205,6 +2386,8 @@ class VerticalScrolledFrame(tkinter.Frame):
         self.canvas = tkinter.Canvas(self, bd=0, highlightthickness=0,bg="white",
                         yscrollcommand=vscrollbar.set,height = 800)
         self.canvas.bind_all("<MouseWheel>",self.on_mousewheel)
+        self.canvas.bind("<Enter>",self.on_entry)
+        self.canvas.bind("<Leave>", self.on_exit)
         self.canvas.pack(side=tkinter.LEFT, fill=tkinter.BOTH, expand=tkinter.TRUE)
         vscrollbar.config(command=self.canvas.yview)
 
@@ -2240,7 +2423,16 @@ class VerticalScrolledFrame(tkinter.Frame):
                 self.canvas.itemconfigure(interior_id, width=self.canvas.winfo_width())
                 self.canvas.bind('<Configure>', _configure_canvas)
 
+    def on_exit(self,event):
+        print("left canvas")
+        self.canvas.unbind_all("<MouseWheel>")
+
+    def on_entry(self,event):
+        print("entered canvas")
+        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+
     def on_mousewheel(self,event):
+        print("psdf")
         self.canvas.yview_scroll(-1 * int(event.delta / 120), "units")
 
 

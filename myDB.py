@@ -92,23 +92,28 @@ def delete_job(jobNo,jobName,jobDate):
     jobID = result[0]
     print("job id is",jobID)
     sites = cur.execute('''SELECT * from Site where jobNo = ? ''', (jobID,)).fetchall()
-    for site in sites:
-        siteID = site[0]
-        print("looking at site",siteID)
-        cur.execute('''DELETE from movement where siteid = ? ''', (siteID,))
-    conn.commit()
-    cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
-    cur.execute('''DELETE from job where id = ? ''', (jobID,))
-    conn.commit()
+    try:
+        for site in sites:
+            siteID = site[0]
+            print("looking at site",siteID)
+            cur.execute('''DELETE from movement where siteid = ? ''', (siteID,))
+        conn.commit()
+        cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
+        cur.execute('''DELETE from job where id = ? ''', (jobID,))
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+        return False
 
-def save_Job(data):
+def save_Job(data,user):
     global databaseFile
     conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
     job = data["job"]
     sites = data["sites"]
-
+    user= user.title()
+    print("user is",user)
     ###
     ### check job doesnt already exist
     ###
@@ -118,50 +123,78 @@ def save_Job(data):
     if row is not None:
         if messagebox.askyesno(message="This job already exists, do you want to overwrite it?"):
             jobID = row[0]
-
-            for site in cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall():
-                siteID = site[0]
-                cur.execute('''DELETE from movement where siteid = ? ''',(siteID,))
-            cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
-            cur.execute('''DELETE from job where id = ? ''', (jobID,))
+            try:
+                for site in cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall():
+                    siteID = site[0]
+                    cur.execute('''DELETE from movement where siteid = ? ''',(siteID,))
+                cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
+                cur.execute('''DELETE from job where id = ? ''', (jobID,))
+                job["folder"] = row[19]
+            except sqlite3.OperationalError as e:
+                messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+                return False
         else:
-            return
-
+            return False
+    else:
+        dir = filedialog.askdirectory(title="Please select Project Location",initialdir="S:\\SCOTLAND DRIVE 2\\JOB FOLDERS\\")
+        if dir == "":
+            messagebox.showinfo(message="No Project Location selected, project not saved")
+            return False
+        job["folder"] = dir
+    print("selected job folder is",job["folder"])
     d = datetime.datetime.strptime(job["surveyDate"],"%d/%m/%y").date()
     createdDate = datetime.datetime.today().date()
-    cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],d,job["timeperiod1"]
+    try:
+        cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate,createdBy) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],d,job["timeperiod1"]
                                                     ,job["timeperiod2"],job["timeperiod3"],job["timeperiod4"]
-                                                    ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate))
+                                                    ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate,user))
+    except sqlite3.OperationalError as e:
+        messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+        return False
     #result= cur.execute('''SELECT  ID from job where name = ? ''', (job["jobname"],))
     jobID = cur.lastrowid
     print("inserted new job, id is ",jobID)
     print("site data to be inserted is",sites)
     for site in sites:
-        print("looking to add to database, site",site)
         siteNo = site[0]
         combined = int(site[1])
         original=int(site[2])
         dir = int(site[3])
         cam = site[4]
-        print("looking for site",siteNo,"for job",job["jobname"])
         result = cur.execute('''SELECT  * from Site where siteno = ?  AND jobNo = ?''', (siteNo,jobID))
         row = result.fetchone()
         if row is None:
             print("didnt find site",siteNo," adding to database, site",siteNo)
-            cur.execute("INSERT INTO Site (siteno,jobno) VALUES(?,?)",(siteNo,jobID))
-            siteID = cur.lastrowid ## primary key of site that we just inserted
-            cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",(siteID,combined,original,dir,cam))
-            print("inserting new movement for site",siteNo,"siteID",siteID)
+            try:
+                cur.execute("INSERT INTO Site (siteno,jobno) VALUES(?,?)",(siteNo,jobID))
+                siteID = cur.lastrowid ## primary key of site that we just inserted
+                cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",(siteID,combined,original,dir,cam))
+                print("inserting new movement for site",siteNo,"siteID",siteID)
+            except sqlite3.OperationalError as e:
+                messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+                return False
         else:
             siteID = row[0]  ### the primary key for a site, we need it to create a new movement record
             print("We found site",row[1],"with id",siteID)
-            cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",
+            try:
+                cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",
                         (siteID, combined, original, dir,cam))
+            except sqlite3.OperationalError as e:
+                messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+                return False
             print("inserting new movement")
         print("committing")
-        conn.commit()
+        #conn.commit()
     conn.commit()
+    try:
+        os.mkdir(job["folder"] + "/output")
+    except Exception as e:
+        print(e,type(e))
+    try:
+        os.mkdir(job["folder"] + "/data")
+    except Exception as e:
+        print(e, type(e))
 
 def load_job(jobNo,jobName,jobDate):
     global databaseFile
@@ -257,7 +290,7 @@ def update_job_with_progress(jobID,entry):
     try:
         cur.execute("UPDATE job SET " + entry + " = ? WHERE ID = ?",(d,jobID))
     except sqlite3.OperationalError as e:
-        messagebox.showinfo(message="database is locked, try again later")
+        messagebox.showinfo(message="database is locked, couldnt update progress of job")
         return
     conn.commit()
 
@@ -273,12 +306,16 @@ def process_transactions():
             #print("trying to process  ",transaction[0],transaction[1])
             cur.execute(transaction[0],transaction[1])
         if settings != None:
-            cur.execute("DELETE FROM settings")
-            for s in settings:
-                #print ("setting is " ,s)
-                width,height,x,y = s
-                cur.execute("INSERT  INTO settings  VALUES (NULL,?,?,?,?,NULL)",(x,y,width,height))
-            settings = None
+            try:
+                cur.execute("DELETE FROM settings")
+                for s in settings:
+                    #print ("setting is " ,s)
+                    width,height,x,y = s
+                    cur.execute("INSERT  INTO settings  VALUES (NULL,?,?,?,?,NULL)",(x,y,width,height))
+                settings = None
+            except sqlite3.OperationalError as e:
+                messagebox.showinfo(message="Database is locked, couldnt save settings\n, please try again later.")
+                return False
         #print("committing")
         conn.commit()
         time.sleep(.5)
@@ -349,8 +386,12 @@ def update_comment(jobID,siteNo,move,text):
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
     siteID = cur.execute("SELECT id from site WHERE siteNo = ? AND jobNo =  ?",(siteNo,jobID)).fetchone()[0]
-    cur.execute("UPDATE movement SET comment = ? WHERE siteID = ?  and combinedMovementNum = ?",(text,siteID,move))
-    conn.commit()
+    try:
+        cur.execute("UPDATE movement SET comment = ? WHERE siteID = ?  and combinedMovementNum = ?",(text,siteID,move))
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        messagebox.showinfo(message="Database is locked, couldnt save comment\n, please try again later.")
+        return False
 
 def getSettings():
     conn = sqlite3.connect('markets.sqlite', detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
