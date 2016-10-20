@@ -300,6 +300,7 @@ def load_classes(job):
 
         tempdf = pd.read_excel(file,converters={"VRN": str})
         tempdf.drop_duplicates(subset=["VRN"],inplace=True)
+        tempdf = tempdf[["VRN","Class"]]
         tempdf.to_pickle(dataFolder + "/classes.pkl")
         df.drop("Class", inplace=True)
         df.reset_index(inplace=True)
@@ -792,7 +793,7 @@ def calculate_nondirectional_cordon(job):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index, t in enumerate(times[:-1]):
+    for index in range(0, len(times) - 1, 2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
@@ -984,23 +985,15 @@ def calculate_cordon_in_out_only(job):
         messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
     return result
 
-def calculate_route_assignment_split_by_in(job):
+def calculate_route_assignment_split_by_in_out(job):
     global df, backgroundThread
 
     outputFolder = os.path.join(job["folder"], "output")
-    dataFolder = os.path.join(job["folder"], "data")
-    ###
-    ### set up a background thread to process and run the full routes calculation, since that is time consuming
-    ### if it has already been run ( full route data.pkl exists in the folder) then we dont need to run it again
-    ###
-
-    inMov = []
-    outMov = []
+    result = []
     fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
     fullDf = fullDf[fullDf["Class"].notnull()]
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
-    dataframes = []
     for index in range(0,len(times)-1,2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
@@ -1015,9 +1008,10 @@ def calculate_route_assignment_split_by_in(job):
 
 
         ###
-        ### we take a subset of the dataframe, removing any intermediate sites. We then look for any
+        ### make a copy of the dataframe. first remove any intermediate sites, sort by VRN and date, then find a
         ### plate where its marked as an in, and the next occurence of the same plate is marked as an out
-        ### we then have 1 full journey through the cordon
+        ### we then have 1 full journey through the cordon. We set the in as a match ( matched = "Y")
+        ###
         ###
 
 
@@ -1027,7 +1021,6 @@ def calculate_route_assignment_split_by_in(job):
         mask1 = (matchedDf["dir"] != 3) ### exclude all intermediate sites
         matchedDf = matchedDf[mask1]
         matchedDf["shifted"] = matchedDf["dir"].shift(-1)
-
         mask = ((matchedDf["dir"] == 1) & (matchedDf["shifted"] == 2) & (temp["VRN"] == temp["VRN"].shift(-1)))
         matchedDf.ix[mask, "matched"] = "Y"
         matchedDf = matchedDf[["matched"]]
@@ -1038,18 +1031,49 @@ def calculate_route_assignment_split_by_in(job):
         ###
 
         temp = temp.merge(matchedDf, how="left", left_index=True, right_index=True)
-        dataframes.append(temp)
+        del temp["matched_x"]
 
+        ###
+        ### group the dataframe by plate, then aggregate each group into comma separated fields
+        strJoin = lambda x: ",".join(x.astype(str))
+        dateJoin = lambda x: ",".join(x.apply(date_to_time))
+        temp = temp.groupby(["VRN", "Class"]).agg({"Date": dateJoin, "newMovement": strJoin,"matched_y":strJoin})
+        temp.reset_index(inplace=True)
+        temp = temp[["VRN","Class","newMovement","Date","matched_y"]]
+        values=temp.values.tolist()
 
-    temp = pd.concat(dataframes)
-    del temp["matched_x"]
-    temp["duration"] = temp["outTime"] - temp["Date"]
-    temp["duration"] = temp["duration"].apply(format_timedelta)
+        ###
+        ### process the comma separated fields so that we split up each journey between an in and an out
+        ###
 
-    temp["outTime"] = temp["Date"].shift(-1)
-    temp["outMovement"] = temp["newMovement"].shift(-1)
-    print(temp.head())
-    print(temp.tail())
+        for v in values:
+            for i in range(2, 5):
+                v[i] = [item for item in v[i].split(",")]
+            print(v)
+            index = 0
+            while index < len(v[4]):
+                journey=[v[0],v[1]]
+                try:
+                    index = v[4][index:].index("Y") + index
+                    while v[4][index] != "N":
+                        journey.append(v[2][index])
+                        journey.append(v[3][index])
+                        index+=1
+                except ValueError as e:
+                    break
+                except IndexError as e:
+                    break
+                ###
+                ### need to append again, as we were looking for an "N" and exiting the loop when we found it
+                ###
+                journey.append(v[2][index])
+                journey.append(v[3][index])
+                result.append(journey)
+
+    with open(outputFolder + "/Route Assignment - all journeys - split by in-out.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows(result)
+
 
 def calculate_route_assignment_fs_ls(job):
     global df,backgroundThread
@@ -1081,7 +1105,7 @@ def calculate_route_assignment_fs_ls(job):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index, t in enumerate(times[:-1]):
+    for index in range(0, len(times) - 1, 2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
@@ -1174,7 +1198,7 @@ def calculate_route_assignment_journey_pairs(job):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index, t in enumerate(times[:-1]):
+    for index in range(0, len(times) - 1, 2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
@@ -1285,9 +1309,19 @@ def calculate_route_assignment_full_routes(job):
         l.insert(6,"")
 
         result.append(l)
+    ###
+    ### output the data to csv
+    ###
+
     with open(outputFolder + "/Route Assignment - all full journeys.csv", "w",newline="") as f:
         writer = csv.writer(f)
         writer.writerows(result)
+
+    ###
+    ### we also want to calculate the journeys, with the full journeys split by any in-outs
+    ###
+    calculate_route_assignment_split_by_in_out(job)
+
     print("finished thread")
 
 def calculate_overtaking(job,movementPair):
@@ -1298,7 +1332,7 @@ def calculate_overtaking(job,movementPair):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index, t in enumerate(times[:-1]):
+    for index in range(0, len(times) - 1, 2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
@@ -1469,16 +1503,17 @@ def resample_overtaking_data(job,df,time_as_string,pair):
     file = outputFolder + "/Overtaking.xlsx"
     outDf.to_excel(file, sheet_name="Movement " + str(mov1) + "-" + str(mov2),index=False,header=["VRN","In Order","Time","Out Order","Time","Duration"])
 
-    print("fihisned writing to excel")
 
     temp.set_index(["Date"], inplace=True)
     temp = temp[["VRN","overtook", "overtaken by", "duration", "manouvres"]]
     temp = temp[["VRN","duration", "manouvres", "overtaken by","overtook"]]
 
-    print(temp.head())
 
     resampled = temp.resample("60T").apply({"VRN": "count", "overtook": lambda x: int((x!=0).sum()), "overtaken by": lambda x: int((x!=0).sum()),"duration": lambda x: pd.to_timedelta(x).mean(), "manouvres": np.sum})
+    resampled.fillna(0, inplace=True)
+    resampled["manouvres"]=resampled["manouvres"].astype(int)
     resampled["duration"] = resampled["duration"].apply(format_timedelta)
+
 
     ###
     ### set up a base dataframe spanning the whole survey period, ready to be merged with the resampled dataframe
@@ -1487,7 +1522,11 @@ def resample_overtaking_data(job,df,time_as_string,pair):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     d = datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")
-    rng = pd.date_range(d + " " + times[0], d + " " + times[-1], freq="60T", closed="left")
+    startTime = datetime.datetime.strptime(times[0], "%H:%M").replace(minute=0, second=0)
+    endTime = datetime.datetime.strptime(times[-1], "%H:%M")
+    if endTime.minute > 0:
+        endTime.replace(hour=endTime.hour + 1, minute=0, second=0)
+    rng = pd.date_range(d + " " + startTime.strftime("%H:%M"), d + " " + endTime.strftime("%H:%M"), freq="60T", closed="left")
     indexDf = pd.DataFrame(index=rng)
 
     ###
@@ -1495,13 +1534,15 @@ def resample_overtaking_data(job,df,time_as_string,pair):
 
     resampled = resampled.merge(indexDf, how="outer", left_index=True, right_index=True)
 
-
+    print(resampled.head())
     ###
     ### reset index so that Date is a column again
     ###
 
+    #
+    resampled.index.name = "Date"
     resampled.reset_index(inplace=True)
-    resampled.fillna(0,axis =1)
+    resampled.fillna(0)
     resampled["Date"] = resampled["Date"].apply(lambda x: datetime.datetime.strftime(x,"%H:%M"))
     resampled["speed"] = 0
     resampled = resampled[["Date","VRN","duration","speed","manouvres","overtaken by","overtook"]]
@@ -1544,15 +1585,26 @@ def get_platoon(dt,platooningTime):
         platoon+=1
         return platoon
 
+def practice(series):
+    print("______HEREHHHHH______________")
+    print(series)
+    if len(series)==0:
+        return 0
+    print(series.value_counts())
+    return series.value_counts()
+
 def calculate_platooning(job,movement,platooningTime):
     global df,platoon
+    result = []
+    platoon = 0
     outputFolder = os.path.join(job["folder"], "output")
     fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")].copy()
     fullDf = fullDf[fullDf["Class"].notnull()]
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index, t in enumerate(times[:-1]):
+    summary = []
+    for index in range(0, len(times) - 1, 2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
@@ -1563,36 +1615,84 @@ def calculate_platooning(job,movement,platooningTime):
         temp["timeDiff"] = temp["timeDiff"].shift(1)
         #temp["timeDiff"].iloc[0] = datetime.timedelta(seconds=10000)
         dataframes.append(temp)
-    platoon = 0
-    temp = pd.concat(dataframes)
-    temp["platoon"] = 0
-    temp["platoon"] = temp["timeDiff"].apply(lambda x: get_platoon(x,platooningTime))
-    strJoin = lambda x: ",".join(x.astype(str))
-    dateJoin = lambda x: ",".join(x.apply(date_to_time))
-    temp = temp.groupby("platoon").agg({"Date": dateJoin,"Class":strJoin,"VRN":strJoin})
-    mask = temp["Class"].apply(lambda x: len(x.split(",")) > 1)
-    temp = temp[mask]
-    temp["length"] = temp["VRN"].apply(lambda x: len(x.split(",")))
-    temp["time"] = temp["Date"].apply(lambda x: pd.to_datetime(x.split(",")[0]))
-    temp = temp[["VRN","Date","Class","length","time"]]
-    values = temp.values.tolist()
 
-    ###
-    ### format the result of the platooning and grouping into a list of lists
-    ###
+        temp["platoon"] = 0
+        temp["platoon"] = temp["timeDiff"].apply(lambda x: get_platoon(x,platooningTime))
+        strJoin = lambda x: ",".join(x.astype(str))
+        dateJoin = lambda x: ",".join(x.apply(date_to_time))
+        temp = temp.groupby("platoon").agg({"Date": dateJoin,"Class":strJoin,"VRN":strJoin})
+        mask = temp["Class"].apply(lambda x: len(x.split(",")) > 1)
+        temp = temp[mask]
+        temp["length"] = 0
+        temp["length"] = temp["VRN"].apply(lambda x: len(x.split(",")))
+        temp["time"] = temp["Date"].apply(lambda x: pd.to_datetime(x.split(",")[0]))
+        temp = temp[["VRN","Date","Class","length","time"]]
+        values = temp.values.tolist()
+        for v in values:
+            output = []
+            plates = v[0].split(",")
+            t = v[1].split(",")
+            classes = v[2].split(",")
+            output.append(plates[0])
+            output.append(classes[0])
+            output.append(t[0])
+            for c in classes[1:]:
+                output.append(c)
+            result.append(output)
 
-    result = []
-    for v in values:
+        ###
+        ### format the results into a summary table for display in the app
+        ###
+
+        startTime = datetime.datetime.strptime(times[index], "%H:%M").replace(minute=0,second=0)
+        endTime = datetime.datetime.strptime(times[index + 1], "%H:%M")
+        if endTime.minute >0:
+            endTime.replace(hour=endTime.hour+1,minute=0,second=0)
+
+        ###
+        ### set up the summary list for the platooning info
+        ### the list has the time, and then 0's for each entry
+        ###
+
         output = []
-        plates = v[0].split(",")
-        t = v[1].split(",")
-        classes = v[2].split(",")
-        output.append(plates[0])
-        output.append(classes[0])
-        output.append(t[0])
-        for c in classes[1:]:
-            output.append(c)
-        result.append(output)
+        while startTime < endTime:
+            l = [date_to_time(startTime)]
+            for i in range(1, 11):
+                l.append(0)
+            startTime = startTime + datetime.timedelta(hours=1)
+            summary.append(l)
+
+        ###
+        ### resample the data into 1 hour bins
+        ###
+        print(temp.head())
+        temp.set_index(["time"], inplace=True)
+        print(temp.head())
+        resampled = temp.resample("60T").apply({"length": "value_counts"})
+        print(resampled)
+        resampled.columns = ["count"]
+        resampled.reset_index(inplace=True)
+        # resampled.set_index(["time"],inplace=True)
+        resampled = resampled.values.tolist()
+
+        ###
+        ###  fill the data into our output list
+        ###
+        for i, row in enumerate(resampled):
+            t, index, count = row[0], row[1], row[2]
+            print(t, index, count)
+            for o in summary:
+                if o[0] == date_to_time(t):
+                    if index < 11:
+                        o[index - 1] = count
+                    else:
+                        o[10] += count
+
+
+
+    #temp = pd.concat(dataframes)
+
+
 
     ###
     ### write the results to excel
@@ -1617,53 +1717,11 @@ def calculate_platooning(job,movement,platooningTime):
     except PermissionError as e:
         messagebox.showinfo(message="Platooning Excel file already open, cant save,please try again")
 
-    ###
-    ### format the results into a summary table for display in the app
-    ###
 
-    startTime = datetime.datetime.strptime(times[0],"%H:%M")
-    endTime = datetime.datetime.strptime(times[-1], "%H:%M")
-
-    ###
-    ### set up the summary list for the platooning info
-    ### the list has the time, and then 0's for each entry
-    ###
-
-    output = []
-    while startTime < endTime:
-        l = [date_to_time(startTime)]
-        for i in range(1,11):
-            l.append(0)
-        startTime = startTime + datetime.timedelta(hours=1)
-        output.append(l)
-
-    ###
-    ### resample the data into 1 hour bins
-    ###
-
-    temp.set_index(["time"],inplace=True)
-    resampled = temp.resample("60T").apply({"length": "value_counts"})
-    resampled.columns = ["count"]
-    resampled.reset_index(inplace=True)
-    #resampled.set_index(["time"],inplace=True)
-    resampled = resampled.values.tolist()
-
-    ###
-    ###  fill the data into our output list
-    ###
-    for i,row in enumerate(resampled):
-        t,index,count = row[0],row[1],row[2]
-        print(t,index,count)
-        for o in output:
-            if o[0] == date_to_time(t):
-                if index < 11:
-                    o[index-1]= count
-                else:
-                    o[10] += count
-    total = [sum(i) for i in list(zip(*output))[1:]]
+    total = [sum(i) for i in list(zip(*summary))[1:]]
     total.insert(0,"Total")
-    output.append(total)
-    return output
+    summary.append(total)
+    return summary
 
 
 
@@ -1686,8 +1744,8 @@ def test():
     print(len(df))
 
 
-    #calculate_route_assignment_split_by_in(job)
-    #exit()
+    calculate_route_assignment_split_by_in_out(job)
+    exit()
 
 
     #calculate_route_assignment_full_routes(job)
@@ -1708,7 +1766,7 @@ def test():
     temp = temp[["matched"]]
     df = df.merge(temp,how="left",left_index=True,right_index=True)
     print(df.head(50))
-    grps = df.groupby(["VRN"]).apply(lambda g: g[g['matched_y'] == "Y"])
+    grps = df.groupby(["VRN"])##.apply(lambda g: g[g['matched_y'] == "Y"])
     print(grps.get_group("00C15057"))
 
 
@@ -1758,7 +1816,7 @@ def test():
     exit()
 
 
-test()
+#test()
 
 win = mainwindow.mainWindow()
 win.setCallbackFunction("load unclassed",load_unclassed_plates)

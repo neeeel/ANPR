@@ -156,6 +156,7 @@ class mainWindow(tkinter.Tk):
         tkinter.Label(platooningFrame, text="Time = ", bg="white").grid(row=1, column=0, pady=10,sticky="e")
         e =tkinter.Entry(platooningFrame, text="5",width=4, bg="white", validate="key", validatecommand=vcmd)
         e.grid(row=1,column=1,sticky="w")
+        e.delete(0,tkinter.END)
         e.insert(tkinter.END,"5")
         e.bind("<Return>",self.recalculate_platooning_data)
         e.bind("<Tab>", self.recalculate_platooning_data)
