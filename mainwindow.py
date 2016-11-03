@@ -7,7 +7,7 @@ from tkinter import messagebox
 import datetime
 import openpyxl
 import win32com.client
-from PIL import Image,ImageDraw,ImageTk
+from PIL import Image,ImageDraw,ImageTk,JpegImagePlugin,Jpeg2KImagePlugin
 from tkinter import filedialog
 import threading
 import os
@@ -64,6 +64,7 @@ class mainWindow(tkinter.Tk):
         self.comparisonDataStructure = []
         self.configure(bg = "white")
         self.jobListBox = None
+        self.matrixData = None
 
         self.currentJob = None
         self.durationsDictionary = None
@@ -94,6 +95,8 @@ class mainWindow(tkinter.Tk):
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
         self.user,file=self.load_settings()
+        if self.user == "" or file == "":
+            self.spawn_settings_window()
         self.spawn_survey_setup_screen()
 
     def get_cordon_data(self):
@@ -370,29 +373,79 @@ class mainWindow(tkinter.Tk):
             self.processOvertakingThread.start()
         return "break"
 
+    def display_option_changed(self,event):
+        widget = event.widget
+        print(widget.get(),widget.current())
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+            label = self.nametowidget(self.winfo_children()[2])
+        else:
+            label = self.nametowidget(self.winfo_children()[1])
+        if label.cget("text") == "Directional Cordon":
+            self.get_directional_cordon_data(widget.current(),get_data=False)
+        else:
+            self.get_nondirectional_cordon_data(widget.current(), get_data=False)
+
+    def routes_display_option_changed(self, event):
+        widget = event.widget
+        print(widget.get(), widget.current())
+        label = self.nametowidget(self.winfo_children()[1])
+        print("label text is", label.cget("text"))
+        if label.cget("text") == "First Seen/Last Seen":
+            self.get_non_directional_route_assignment_fs_ls_data(widget.current(), get_data=False)
+        else:
+            self.get_journey_pairs_data(widget.current(), get_data=False)
+
     def spawn_cordon_screen(self):
         for child in self.winfo_children():
-            child.destroy()
+            if type(self.nametowidget(child)) != tkinter.Toplevel:
+                child.destroy()
         width = self.winfo_screenwidth() - 320
         height = self.winfo_screenheight() - 200
         self.matrixCanvasList = []
         frame = tkinter.Frame(self, bg="white")
-        tkinter.Button(frame, text="In/Out Only", bg="white", height=3,width=12,
-                       command=self.get_directional_cordon_data).grid(row=0, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Non Directional", bg="white", height=3,width=12,
-                       command=self.get_nondirectional_cordon_data).grid(row=1, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Back", bg="white", height=3, width=12,
-                       command=self.spawn_home_window).grid(row=3, column=0, padx=10, pady=10)
-        frame.grid(row=0,column=0, padx=20, pady=10,sticky="w")
+        box = ttk.Combobox(frame,  width=10)
+        box["values"] = ("Count", "Max", "Min", "Avg")
+        box.bind("<<ComboboxSelected>>", self.display_option_changed)
+        box.grid(row=0,column=0)
+        box.current(0)
+        tkinter.Label(self, bg="white", text="Directional Cordon").grid(row=0, column=1)
+        f = tkinter.font.Font(family="courier", size=8)
+        checkboxframe = tkinter.Frame(frame, bg="white")
+        var = tkinter.IntVar()
+        ch =tkinter.Checkbutton(checkboxframe, text="In-Out",font=f, bg="white",variable=var)
+        ch.grid(row=0, column=0)
+        ch.select()
+        ch.var=var
+        var = tkinter.IntVar()
+        ch=tkinter.Checkbutton(checkboxframe, text="In-Both",font=f, bg="white",variable=var)
+        ch.grid(row=1, column=0)
+        ch.var=var
+        var = tkinter.IntVar()
+        ch=tkinter.Checkbutton(checkboxframe, text="Both-Out",font=f, bg="white",variable=var)
+        ch.grid(row=2, column=0)
+        ch.var = var
+        var = tkinter.IntVar()
+        ch=tkinter.Checkbutton(checkboxframe, text="Both-Both",font=f, bg="white",variable=var)
+        ch.grid(row=3, column=0)
+        ch.var = var
+        checkboxframe.grid(row=1,column=0)
 
-        frame = tkinter.Frame(self, bg="white",relief=tkinter.GROOVE,borderwidth=3,width = 800, height = 800)
-        frame.grid(row=0, column=1)
+        tkinter.Button(frame, text="Directional", bg="white", height=3,width=12,
+                       command=lambda :self.get_directional_cordon_data(0)).grid(row=2, column=0, padx=10, pady=10)
+        tkinter.Button(frame, text="Non Directional", bg="white", height=3,width=12,
+                       command=lambda:self.get_nondirectional_cordon_data(0)).grid(row=3, column=0, padx=10, pady=10)
+        tkinter.Button(frame, text="Back", bg="white", height=3, width=12,
+                       command=self.spawn_home_window).grid(row=4, column=0, padx=10, pady=10)
+        frame.grid(row=0,column=0, padx=20, pady=10,sticky="w",rowspan=5)
+
+        frame = tkinter.Frame(self,relief=tkinter.GROOVE,borderwidth=3,width = 800, height = 800)
+        frame.grid(row=1, column=1)
         frame.grid_propagate(False)
         bar = tkinter.Scrollbar(frame, orient=tkinter.VERTICAL)
         hbar = tkinter.Scrollbar(frame, orient=tkinter.HORIZONTAL)
         bar.bind("<Button-1>", self.scroll_matrix_screen)
         hbar.bind("<Button-1>", self.scroll_matrix_screen)
-        canvas = tkinter.Canvas(frame, bg="white", width=width, height=height, scrollregion=(0, 0, width, height))
+        canvas = tkinter.Canvas(frame, width=width, height=height, scrollregion=(0, 0, width, height))
         leftCanvas = tkinter.Canvas(frame, width=50, height=height, scrollregion=(0, 0, width, height),
                                     yscrollcommand=bar.set)
         topCanvas = tkinter.Canvas(frame, width=width, height=30, scrollregion=(0, 0, width, height),
@@ -405,24 +458,32 @@ class mainWindow(tkinter.Tk):
         canvas.grid(row=1, column=1,sticky="nw")
         bar.grid(row=1, column=2, rowspan=1, sticky="NS")
         hbar.grid(row=2, column=1, columnspan=1, sticky="EW")
-        self.get_directional_cordon_data()
+        self.get_directional_cordon_data(0)
 
     def spawn_route_assignment_screen(self):
         for child in self.winfo_children():
-            child.destroy()
+            if type(self.nametowidget(child)) != tkinter.Toplevel:
+                child.destroy()
         self.matrixCanvasList  = []
         width = self.winfo_screenwidth() - 120
         height = self.winfo_screenheight() - 200
         frame = tkinter.Frame(self, bg="white")
+        box = ttk.Combobox(frame, width=10)
+        box["values"] = ("Count", "Max", "Min", "Avg")
+        box.bind("<<ComboboxSelected>>", self.routes_display_option_changed)
+        box.grid(row=0, column=0)
+        box.current(0)
         tkinter.Button(frame, text="First Seen/\nLast Seen", bg="white", height=3, width=12,
-                       command=self.get_non_directional_route_assignment_fs_ls_data).grid(row=0, column=0, padx=10, pady=10)
+                       command=lambda:self.get_non_directional_route_assignment_fs_ls_data(0)).grid(row=1, column=0, padx=10, pady=10)
         tkinter.Button(frame, text="Journey \nPairs", bg="white", height=3, width=12,
-                       command=self.get_journey_pairs_data).grid(row=1, column=0, padx=10, pady=10)
+                       command=lambda:self.get_journey_pairs_data(0)).grid(row=2, column=0, padx=10, pady=10)
         tkinter.Button(frame, text="Back", bg="white", height=3, width=12,
-                       command=self.spawn_home_window).grid(row=2, column=0, padx=10, pady=10)
-        frame.grid(row=0, column=0, padx=20, pady=10, sticky="w")
+                       command=self.spawn_home_window).grid(row=3, column=0, padx=10, pady=10)
+        frame.grid(row=0, column=0, padx=20, pady=10, sticky="w",rowspan=5)
+
+        tkinter.Label(self, bg="white", text="First Seen/Last Seen").grid(row=0, column=1)
         frame = tkinter.Frame(self, bg="white",relief=tkinter.GROOVE,borderwidth=3,width = 800, height = 800)
-        frame.grid(row=0, column=1)
+        frame.grid(row=1, column=1)
         frame.grid_propagate(False)
         bar = tkinter.Scrollbar(frame, orient=tkinter.VERTICAL)
         hbar = tkinter.Scrollbar(frame, orient=tkinter.HORIZONTAL)
@@ -441,7 +502,7 @@ class mainWindow(tkinter.Tk):
         canvas.grid(row=1, column=1,sticky="nw")
         bar.grid(row=1, column=2, rowspan=1, sticky="NS")
         hbar.grid(row=2, column=1, columnspan=1, sticky="EW")
-        self.get_non_directional_route_assignment_fs_ls_data()
+        self.get_non_directional_route_assignment_fs_ls_data(0)
 
     def spawn_duration_matrix_screen(self):
 
@@ -490,6 +551,8 @@ class mainWindow(tkinter.Tk):
             e.delete(0, tkinter.END)
             for k,v in self.durationsDictionary.items():
                     self.durationsDictionary[k] = text
+            with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
+                pickle.dump(self.durationsDictionary, f)
             self.draw_duration_matrix_screen(canvas)
         else:
             messagebox.showinfo(message=e.get() + " is not a valid time")
@@ -698,7 +761,9 @@ class mainWindow(tkinter.Tk):
         e.insert(0,self.durationsDictionary[inMov[y],outMov[x]])
 
     def save_duration_matrix(self,e,win,canvas):
-
+        ###
+        ### save the time entered in the pop up box into the durations dictionary, if it is a correctly formatted time
+        ###
         text = e.get()
         if text.strip() == "":
             return
@@ -709,30 +774,37 @@ class mainWindow(tkinter.Tk):
             i = int(i.replace("in","").strip())
             o = int(o.replace("out", "").strip())
             self.durationsDictionary[i,o]=text
+            with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
+                pickle.dump(self.durationsDictionary, f)
             self.draw_duration_matrix_screen(canvas)
             win.destroy()
         else:
             messagebox.showinfo(message=e.get() + " is not a valid time")
             e.delete(0,tkinter.END)
 
-    def get_non_directional_route_assignment_fs_ls_data(self):
+    def get_non_directional_route_assignment_fs_ls_data(self,index,get_data=True):
         inMov = []
         outMov = []
-        data = self.getRouteAssignmentFsLsFunction(self.currentJob)
-        for item in data[0]:
-            i, o = item[0]
-            if i not in inMov:
-                inMov.append(i)
-            if o not in outMov:
-                outMov.append(o)
+        if get_data:
+            self.matrixData = self.getRouteAssignmentFsLsFunction(self.currentJob)
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if not int(mvmt["newmovement"]) in inMov:
+                    inMov.append(int(mvmt["newmovement"]))
+                if not int(mvmt["newmovement"]) in outMov:
+                    outMov.append(int(mvmt["newmovement"]))
         inMov = sorted(inMov)
         outMov = sorted(outMov)
-        self.draw_matrix(data, inMov, outMov)
+        frame = self.nametowidget(self.winfo_children()[0])
+        box = self.nametowidget(frame.winfo_children()[0])
+        box.current(index)
+        self.draw_matrix(self.matrixData, inMov, outMov,index)
 
-    def get_journey_pairs_data(self):
+    def get_journey_pairs_data(self,index,get_data=True):
         inMov = []
         outMov = []
-        data = self.getJourneyPairsFunction(self.currentJob)
+        if get_data:
+            self.matrixData = self.getJourneyPairsFunction(self.currentJob)
         for site, details in self.currentJob["sites"].items():
             for mvmtNo, mvmt in details.items():
                 if mvmt["newmovement"] not in inMov:
@@ -741,26 +813,64 @@ class mainWindow(tkinter.Tk):
                     outMov.append(mvmt["newmovement"])
         inMov = sorted(inMov)
         outMov = sorted(outMov)
-        self.draw_matrix(data, inMov, outMov)
+        frame = self.nametowidget(self.winfo_children()[0])
+        box = self.nametowidget(frame.winfo_children()[0])
+        box.current(index)
+        self.draw_matrix(self.matrixData, inMov, outMov,0)
 
-    def get_nondirectional_cordon_data(self):
+    def get_nondirectional_cordon_data(self,index,get_data=True):
         inMov=[]
         outMov=[]
-        data = self.getNonDirectionalCordonFunction(self.currentJob)
-        for item in data[0]:
-            i, o = item[0]
-            if i not in inMov:
-                inMov.append(i)
-            if o not in outMov:
-                outMov.append(o)
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+            label = self.nametowidget(self.winfo_children()[2])
+            frame = self.nametowidget(self.winfo_children()[1])
+        else:
+            label = self.nametowidget(self.winfo_children()[1])
+            frame = self.nametowidget(self.winfo_children()[0])
+        label.config(text="Non Directional Cordon")
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if not int(mvmt["newmovement"]) in inMov:
+                    inMov.append(int(mvmt["newmovement"]))
+                if not int(mvmt["newmovement"]) in outMov:
+                    outMov.append(int(mvmt["newmovement"]))
         inMov = sorted(inMov)
         outMov = sorted(outMov)
-        self.draw_matrix(data,inMov,outMov)
+        for child in self.winfo_children():
+            print(type(self.nametowidget(child)))
+        if get_data:
+            print("getting non directional data")
+            self.matrixData = self.getNonDirectionalCordonFunction(self.currentJob)
+        frame = self.nametowidget(self.winfo_children()[0])
+        box = self.nametowidget(frame.winfo_children()[0])
+        box.current(index)
+        self.draw_matrix(self.matrixData,inMov,outMov,index)
 
-    def get_directional_cordon_data(self):
+    def get_directional_cordon_data(self,index,get_data=True):
+        ###
+        ### get the data for a directional in out cordon
+        ### and then display it
+        ### this function can also be called when the combo box value gets changed
+        ### index refers to which set of data is displayed 0 = count, 1=max,2= min,3=avg
         inMov = []
         outMov = []
-        data = self.getCordonFunction(self.currentJob)
+        for child in self.winfo_children():
+            print(type(self.nametowidget(child)))
+        print("*"*150)
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+            label = self.nametowidget(self.winfo_children()[2])
+            frame = self.nametowidget(self.winfo_children()[1])
+        else:
+            label = self.nametowidget(self.winfo_children()[1])
+            frame = self.nametowidget(self.winfo_children()[0])
+        label.config(text="Directional Cordon")
+        if get_data:
+            checkboxes=[]
+            checkboxframe = self.nametowidget(frame.winfo_children()[1])
+            for child in checkboxframe.winfo_children():
+                if type(child) == tkinter.Checkbutton:
+                    checkboxes.append(self.nametowidget(child).var.get())
+            self.matrixData = self.getCordonFunction(self.currentJob,checkboxes)
         for site, details in self.currentJob["sites"].items():
             for mvmtNo, mvmt in details.items():
                 if mvmt["dir"] == 1 or mvmt["dir"] == 3:
@@ -769,10 +879,12 @@ class mainWindow(tkinter.Tk):
                     outMov.append(mvmt["newmovement"])
         inMov = sorted(inMov)
         outMov = sorted(outMov)
-        self.draw_matrix(data,inMov,outMov)
-        #self.draw_matrix2(data,self.matrixCanvasList)
+        #frame = self.nametowidget(self.winfo_children()[0])
+        box = self.nametowidget(frame.winfo_children()[0])
+        box.current(index)
+        self.draw_matrix(self.matrixData,inMov,outMov,index)
 
-    def draw_matrix(self,data,inMov,outMov):
+    def draw_matrix(self,data,inMov,outMov,index):
 
         ###
         ###
@@ -799,10 +911,10 @@ class mainWindow(tkinter.Tk):
         displayWidth = self.winfo_width() - 250
         displayHeight = self.winfo_height() - 20
         print("setting display to ", displayWidth, displayHeight)
-        if displayWidth > canvasWidth+ columnWidth + scrollBarWidth:
-            displayWidth = canvasWidth + columnWidth + scrollBarWidth
-        if displayHeight > canvasHeight+ rowHeight + scrollBarWidth:
-            displayHeight = canvasHeight + rowHeight + scrollBarWidth
+        if displayWidth > canvasWidth+ (2 * columnWidth) + scrollBarWidth:
+            displayWidth = canvasWidth + (2 * columnWidth) + scrollBarWidth
+        if displayHeight > canvasHeight+ ( 2 * rowHeight) + scrollBarWidth :
+            displayHeight = canvasHeight + ( 2 * rowHeight) + scrollBarWidth
 
         print("setting display to ",displayWidth,displayHeight)
         print("canvas settings are",canvasWidth,canvasHeight)
@@ -844,46 +956,49 @@ class mainWindow(tkinter.Tk):
         ###
         ### display data
         ###
+        if index != 0:
+            fontsize-=2
         dataFont = tkinter.font.Font(family="verdana", size=fontsize)
         totalFont = tkinter.font.Font(family="verdana", size=fontsize)
         x, y = 0,0
-        for item in data[0]:
-            i, o = item[0]
-            count = item[1]
+        for key,data in data[0].items():
+            #print(key,data)
+            i, o = key
+            displayedValue = data[index]
             try:
                 row = inMov.index(i) + 1
             except ValueError as e:
-                print("error in ", item)
+                print("error in ", key,data)
                 continue
             try:
                 column = outMov.index(o) + 1
             except ValueError as e:
-                print("error in ", item)
+                print("error in ", key,data)
                 continue
             canvas.create_text((x + (columnWidth * column) - columnWidth / 2),
                                (y + (rowHeight * row) - rowHeight / 2),
-                               text=count, font=dataFont)
+                               text=displayedValue, font=dataFont)
+        if index == 0:
+            column, row = noOfCols, 1
+            print(self.matrixData[1])
+            for value in self.matrixData[1]:
+                canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
+                                   (y + (rowHeight * row) - rowHeight / 2),
+                                   text=int(value), font=totalFont, fill="green")
+                row += 1
 
-        column, row = noOfCols, 1
-        for value in data[1]:
-            canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
-                               (y + (rowHeight * row) - rowHeight / 2),
-                               text=int(value), font=totalFont, fill="green")
-            row += 1
-
-        column, row = 0, noOfRows + 1
-        for value in data[2]:
-            canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
-                               (y + (rowHeight * row) - rowHeight / 2),
-                               text=int(value), font=totalFont, fill="red")
-            column += 1
-        column, row = noOfCols, noOfRows + 1
-        canvas.create_text((x + (columnWidth * column) + columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
-                           text=int(sum(data[1])), font=totalFont, fill="blue")
-        print("sum of data columns is", sum(data[1]), sum(data[2]))
+            column, row = 0, noOfRows + 1
+            for value in self.matrixData[2]:
+                canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
+                                   (y + (rowHeight * row) - rowHeight / 2),
+                                   text=int(value), font=totalFont, fill="red")
+                column += 1
+            column, row = noOfCols, noOfRows + 1
+            canvas.create_text((x + (columnWidth * column) + columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
+                               text=int(sum(self.matrixData[1])), font=totalFont, fill="blue")
         parent = canvas.winfo_parent()
         parent = self.nametowidget(parent)
-        leftCanvas.configure(width = columnWidth,height =displayHeight-rowHeight -scrollBarWidth,scrollregion=(0, 0, canvasWidth , canvasHeight ))
+        leftCanvas.configure(width = columnWidth,height =displayHeight-rowHeight -scrollBarWidth ,scrollregion=(0, 0, canvasWidth , canvasHeight ))
         topCanvas.configure( height=rowHeight, width=displayWidth-columnWidth-scrollBarWidth,scrollregion=(0, 0, canvasWidth , canvasHeight ))
         canvas.configure(width=displayWidth-columnWidth-scrollBarWidth, height=displayHeight-rowHeight -scrollBarWidth,scrollregion=(0, 0, canvasWidth , canvasHeight ))
         parent.configure(width=displayWidth,height=displayHeight)
@@ -1440,6 +1555,10 @@ class mainWindow(tkinter.Tk):
                                                                                                  padx=20, pady=20)
         tkinter.Button(frame, text="Duplicate Removal", width=17, height=3, bg="white",command=self.spawn_duplicates_window).grid(row=4, column=2,padx=20,
                                                                                                         pady=20)
+        tkinter.Button(frame, text="Time \n Adjustments", width=17, height=3, bg="white",command=self.spawn_time_adjustments_screen).grid(row=4, column=3, padx=20,
+                                                                                                                        pady=20,sticky="e")
+
+
         tkinter.Label(frame, text="Comparison", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=5, column=0,ipadx =30)
         tkinter.Button(frame, text="View Comparison", width=17, height=3, bg="white",command= self.get_comparison_data).grid(row=6, column=0,
                                                                                                  padx=20, pady=20)
@@ -1455,9 +1574,87 @@ class mainWindow(tkinter.Tk):
                                                                                              pady=20)
         tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=8, column=3, padx=20,
                                                                                       pady=20,sticky="e")
+
         tkinter.Button(frame, text="Back", width=10, height=1, bg="white",command = self.spawn_survey_setup_screen).grid(row=9, column=0, padx=20,
                                                                                       pady=20)
         frame.grid(row=0, column=0, pady=(120, 0), padx=(320, 0))
+
+    def spawn_time_adjustments_screen(self):
+        for child in self.winfo_children():
+            child.destroy()
+
+        inMov = []
+        outMov = []
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if mvmt["newmovement"] not in inMov:
+                    inMov.append(mvmt["newmovement"])
+                if mvmt["newmovement"] not in outMov:
+                    outMov.append(mvmt["newmovement"])
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        frame = tkinter.Frame(self,bg="white")
+        frame.grid(row=0,column=0)
+        col=0
+        vcmd = (self.register(self.validate_edit), "%d", "%s", "%S")
+        for count,i in enumerate(inMov):
+            e = tkinter.Entry(frame,width=8)
+            e.bind("<FocusOut>", self.validate_time_entry)
+            td = datetime.timedelta(seconds=abs(self.currentJob["timeAdjustmentsDictionary"][i]))
+            if self.currentJob["timeAdjustmentsDictionary"][i] <0 :
+                s = "-" + str(td)
+            else:
+                s = str(td)
+            e.insert(0,s)
+            e.grid(row=count%30,column = (int(count/30) * 2) + 1)
+            tkinter.Label(frame,text="Movement " + str(i),bg="white").grid(row=count%30,column = int(count/30) * 2,padx = 5,pady=5)
+        tkinter.Button(frame,text = "Save",command=self.close_time_adjustments_screen).grid(row=count%30 + 1,column = 0,padx = 5,pady=5)
+        tkinter.Button(frame, text="Back", command=self.spawn_home_window).grid(row=count % 30 + 1,
+                                                                                            column=1, padx=5, pady=5)
+
+    def close_time_adjustments_screen(self):
+        with open(self.currentJob["folder"] + "/data/timeAdjustments.pkl", "wb") as f:
+            pickle.dump(self.currentJob["timeAdjustmentsDictionary"], f)
+        self.loadJobFunction(self.currentJob)
+        self.spawn_home_window()
+
+    def validate_time_entry(self,event):
+        ###
+        ### this function validates a value entered on the time adjustments screen, and puts it into the correct
+        ### movement in the data dictionary.
+        ###
+
+        w = event.widget
+        info = w.grid_info()
+        row = info["row"]
+        col = info["column"]
+        frame = self.nametowidget(self.winfo_children()[0])
+        for label in frame.children.values():
+            info = label.grid_info()
+            if info["row"] == row and info["column"] == col - 1:
+                movement = label.cget("text")
+                movement = int(movement.replace("Movement ",""))
+        prevValue = self.currentJob["timeAdjustmentsDictionary"][movement]
+        text = w.get()
+        negative = False
+        pattern = re.compile("-{0,1}[0-9]:[0-9][0-9]:[0-9][0-9]")
+        if pattern.match(text):
+            if text[0]=="-":
+                negative  = True
+                text = text[1:]
+            t = text.split(":")
+            h = int(t[0])
+            m = int(t[1])
+            s = int(t[2])
+            td = datetime.timedelta(hours=h,minutes=m,seconds=s)
+            if negative:
+                self.currentJob["timeAdjustmentsDictionary"][movement] = 0 - td.total_seconds()
+            else:
+                self.currentJob["timeAdjustmentsDictionary"][movement] = td.total_seconds()
+        else:
+            print("dleeteing")
+            w.delete(0,tkinter.END)
+            w.insert(0,datetime.timedelta(seconds=prevValue))
 
     def open_project_folder(self):
         p = os.path.normpath(self.currentJob["folder"])
@@ -2230,6 +2427,34 @@ class mainWindow(tkinter.Tk):
         self.currentJob = myDB.load_job(jobname["values"][0],jobname["values"][1],jobname["values"][2])
         title = self.currentJob["jobno"] + " " + self.currentJob["jobname"]
         self.wm_title(title)
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if mvmt["newmovement"] not in inMov:
+                    inMov.append(mvmt["newmovement"])
+                if mvmt["newmovement"] not in outMov:
+                    outMov.append(mvmt["newmovement"])
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+
+        ###
+        ### each movement may have a slightly out time, depending on the settings on the camera
+        ### so we may need to add or subtract a time delta from all reocords from a certain movement
+        ### timeAdjustmentDictionary is to keep a record of any entered adjustments, and apply them on loading
+        ### the job
+
+        timeAdjustmentsDictionary = {}
+        try:
+            with open(self.currentJob["folder"] + "/data/timeAdjustments.pkl", "rb") as f:
+                timeAdjustmentsDictionary = pickle.load(f)
+        except IOError as e:
+            for i in inMov:
+                timeAdjustmentsDictionary[i] = 0
+            print("dict is", timeAdjustmentsDictionary)
+            with open(self.currentJob["folder"] + "/data/timeAdjustments.pkl", "wb") as f:
+                pickle.dump(timeAdjustmentsDictionary, f)
+
+        self.currentJob["timeAdjustmentsDictionary"] = timeAdjustmentsDictionary
+
         if not self.loadJobFunction(self.currentJob):
             return
         try:
@@ -2247,14 +2472,7 @@ class mainWindow(tkinter.Tk):
             t1 = datetime.datetime.strptime(endTime, "%H:%M")
             t =  format_timedelta(t1 - t)
             self.durationsDictionary = {}
-            for site, details in self.currentJob["sites"].items():
-                for mvmtNo, mvmt in details.items():
-                    if mvmt["newmovement"] not in inMov:
-                            inMov.append(mvmt["newmovement"])
-                    if mvmt["newmovement"] not in outMov:
-                        outMov.append(mvmt["newmovement"])
-            inMov = sorted(inMov)
-            outMov = sorted(outMov)
+
             self.durationsDictionary = {}
             for i in inMov:
                 for o in outMov:
@@ -2262,6 +2480,8 @@ class mainWindow(tkinter.Tk):
         self.currentJob["durationsDictionary"] = self.durationsDictionary
         with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
             pickle.dump(self.durationsDictionary, f)
+
+
         self.spawn_home_window()
 
     def delete_job(self):
@@ -2353,6 +2573,7 @@ class mainWindow(tkinter.Tk):
             self.updateDataFunction = fun
         if text == "recalculate platooning":
             self.recalcuatePlatooningfunction = fun
+
 
 def format_timedelta(td):
     minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
