@@ -56,7 +56,8 @@ def create_Db():
                     createdDate DATE,
                     classification TEXT,
                     folder TEXT,
-                    duplicatesSelected INTEGER
+                    selectedDuplicates INTEGER,
+                    plateRestriction INTEGER
                     )''')
 
     cur.execute('''CREATE TABLE IF NOT EXISTS Site (
@@ -78,6 +79,7 @@ def create_Db():
                 )''')
     conn.commit()
     #messagebox.askyesno(message="Do you want to set this new database as the working database?")
+    return path+fileName
 
 def delete_job(jobNo,jobName,jobDate):
     global databaseFile
@@ -110,6 +112,7 @@ def save_Job(data,user):
     conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
+    print("successfully opend db")
     job = data["job"]
     sites = data["sites"]
     user= user.title()
@@ -145,12 +148,13 @@ def save_Job(data,user):
     d = datetime.datetime.strptime(job["surveyDate"],"%d/%m/%y").date()
     createdDate = datetime.datetime.today().date()
     try:
-        cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate,createdBy) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],d,job["timeperiod1"]
+        cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate,createdBy,plateRestriction) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],d,job["timeperiod1"]
                                                     ,job["timeperiod2"],job["timeperiod3"],job["timeperiod4"]
-                                                    ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate,user))
+                                                    ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate,user,1))
     except sqlite3.OperationalError as e:
         messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
+        print(e)
         return False
     #result= cur.execute('''SELECT  ID from job where name = ? ''', (job["jobname"],))
     jobID = cur.lastrowid
@@ -229,9 +233,28 @@ def load_job(jobNo,jobName,jobDate):
     job["classification"] = result[18]
     job["folder"] = result[19]
     job["selectedduplicates"] = result[20]
+    job["platerestriction"] = result[21]
     result = cur.execute("SELECT site.siteno,movement.combinedmovementnum,movement.originalmovementnum,movement.dir,movement.comment,movement.siteID FROM site JOIN job "
                          "ON site.jobno = job.ID JOIN Movement ON site.id = movement.siteid "
                          "WHERE job.id = ?",(job["id"],)).fetchall()
+
+
+    if not os.path.exists(job["folder"]):
+        messagebox.showinfo(message="The assigned folder for this project doesnt exist. Please select a folder location")
+        dir = ""
+        while dir == "":
+            dir = filedialog.askdirectory(title="Please select Project Location",initialdir="S:\\SCOTLAND DRIVE 2\\JOB FOLDERS\\")
+        job["folder"] = dir
+        update_value_of_field(job["id"],"folder",dir)
+        try:
+            os.mkdir(job["folder"] + "/output")
+        except Exception as e:
+            print(e, type(e))
+        try:
+            os.mkdir(job["folder"] + "/data")
+        except Exception as e:
+            print(e, type(e))
+
     l = []
     if result is not None:
         l = [[item for item in r]  for r in result]
@@ -289,6 +312,34 @@ def update_job_with_progress(jobID,entry):
     print("trying to update",entry)
     try:
         cur.execute("UPDATE job SET " + entry + " = ? WHERE ID = ?",(d,jobID))
+    except sqlite3.OperationalError as e:
+        messagebox.showinfo(message="database is locked, couldnt update progress of job")
+        return
+    conn.commit()
+
+def get_value_of_field(jobID,field):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("trying to update", field)
+    try:
+        result = cur.execute("SELECT " + field + " from job WHERE ID = ?", ( jobID,)).fetchone()
+        return result[0]
+
+    except sqlite3.OperationalError as e:
+        messagebox.showinfo(message="database is locked, couldnt update progress of job")
+        return
+
+def update_value_of_field(jobID,field,value):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    d = datetime.datetime.today().date()
+    print("trying to update",field)
+    try:
+        cur.execute("UPDATE job SET " + field + " = ? WHERE ID = ?",(value,jobID))
     except sqlite3.OperationalError as e:
         messagebox.showinfo(message="database is locked, couldnt update progress of job")
         return

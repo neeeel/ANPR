@@ -108,65 +108,44 @@ def load_unclassed_plates(job):
         messagebox.showinfo(message="Not valid CSV file, No plates loaded")
         return
 
-    #try:
-    df = pd.read_excel(file, converters={"VRN": str, "Direction": str, "Date": str, "Time": str})
+    try:
+        if ".csv" in file:
+            df = pd.read_csv(file)
+        else:
+            df = pd.read_excel(file, converters={"VRN": str, "Direction": str, "Date": str, "Time": str})
+        df = df[["Date","Time","Movement","VRN"]]
+        print(df.head())
+        df["Date"] = pd.to_datetime(df["Date"] + " " + df["Time"])
+        df.drop(["Time"], inplace=True, axis=1)
+        df["Class"] = ""
 
-    df = df[["Date","Time","Movement","VRN"]]
-    print(df.head())
-    df["Date"] = pd.to_datetime(df["Date"] + " " + df["Time"])
 
-    df.drop(["Time"], inplace=True, axis=1)
-    #df.set_index(["Date"],inplace=True)
-    df["Class"] = ""
+        ### TODO  : Check that we are doing the duplicates correctly
 
-    ###
-    ### set up the timediff and duplicates column
-    ###
-    print(df.head())
-    df["Duplicates"] = "N"
-    df["Site"] = df["Movement"].apply(convert_movement_to_site, args=(job,))
-    df["newMovement"] = df["Movement"].apply(convert_old_movement_to_new, args=(job,))
-    df["dir"] = df["newMovement"].apply(convert_movement_to_dir, args=(job,))
-    df.sort_values(by=["VRN", "newMovement"], inplace=True, ascending=[True, True])
-   #df.reset_index(inplace=True)
-    df["timeDiff"] = df["Date"].diff()
-    df.set_index(["Date"],inplace=True)
-    mask = (df["VRN"] != df["VRN"].shift(-1)) | (df["newMovement"] != df["newMovement"].shift())
-    df["timeDiff"][mask] = np.nan
-    #df = df["2016-07-05"]
-
-    df.to_pickle(dataFolder + "/data.pkl")
-    #print(df.head(30))
-    #except Exception as e:
-        #messagebox.showinfo(message="Error occured while loading csv file " + str(e))
-        #print(e)
-        #df = None
-        #return
+        ###
+        ### set up the timediff and duplicates column
+        ###
+        print(df.head())
+        df["Duplicates"] = "N"
+        df["Site"] = df["Movement"].apply(convert_movement_to_site, args=(job,))
+        df["newMovement"] = df["Movement"].apply(convert_old_movement_to_new, args=(job,))
+        df["dir"] = df["newMovement"].apply(convert_movement_to_dir, args=(job,))
+        df.sort_values(by=["VRN", "newMovement"], inplace=True, ascending=[True, True])
+        df["timeDiff"] = df["Date"].diff()
+        df.set_index(["Date"],inplace=True)
+        mask = (df["VRN"] != df["VRN"].shift(-1)) | (df["newMovement"] != df["newMovement"].shift(-1))
+        df["timeDiff"][mask] = np.nan
+        df.to_pickle(dataFolder + "/data.pkl")
+    except Exception as e:
+        messagebox.showinfo(message="Error occured while loading csv file " + str(e))
+        print(e)
+        df = None
+        return
     print(df.info())
     myDB.update_job_with_progress(job["id"],"unclassed")
     compute_comparison_data(job)
     load_job(job)
-    return
 
-    ###
-    ### drop any plates that have a length less than 4
-    ###
-
-    print("before dropping short plates, df has ", len(df), "entries")
-    df = df[df["VRN"].str.len() > 4]
-    print("after dropping short plates, df has ", len(df), "entries")
-
-
-    ###
-    ### drop singletons
-    ###
-
-    print("before dropping, df has ",len(df),"entries")
-    counts = df.VRN.value_counts()
-    mask = df["VRN"].isin(counts[counts > 1].index)
-    df= df[mask]
-    print("after dropping, df has ", len(df), "entries")
-    #print(df[mask])
 
 def reset_project(job):
     dataFolder = os.path.join(job["folder"], "data")
@@ -380,6 +359,9 @@ def load_job(job):
     except Exception as e:
         print(e)
 
+
+
+
     ###
     ### TODO remove this section, just added for John Anderson site 3 was 10 seconds out
     #df.reset_index(inplace=True)
@@ -401,15 +383,43 @@ def load_job(job):
     ###
     ### make any time adjustments
     ###
+
     df.reset_index(inplace=True)
     for k,v in job["timeAdjustmentsDictionary"].items():
-        print("key",k,"value",v)
         if v != 0:
-            print("changing time")
-            print(df.head())
             df.ix[df["newMovement"] == k, "Date"] += pd.Timedelta(seconds=v)
-    print(df.head())
     df.set_index("Date",inplace=True)
+
+
+    ###
+    ### restrict plates based on length
+    ###
+    print("lenth of df BEFORE plate restrictions", len(df))
+    job["platerestrictionpercentages"] = []
+
+    if len(df) != 0:
+        job["platerestrictionpercentages"].append(100)
+        print(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]))
+        job["platerestrictionpercentages"].append(
+            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
+        job["platerestrictionpercentages"].append(
+            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
+        job["platerestrictionpercentages"].append(
+            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)]) * 100 / len(df))))
+    else:
+        job["platerestrictionpercentages"] = [0,0,0,0]
+        return True
+
+    if job["platerestriction"] == 1:
+        return True
+    if job["platerestriction"] == 2:
+        mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)
+    if job["platerestriction"] == 3:
+        mask = (df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)
+    if job["platerestriction"] == 4:
+        mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)
+    df = df[mask]
+    print("lenth of df after plate restrictions", len(df))
     return True
 
 def bin_time(t):
@@ -787,6 +797,10 @@ def date_to_time(d):
         except Exception as e:
             return "00:00:00"
 
+def dir_to_str(dir):
+    dirs = ["I", "O", "B"]
+    return dirs[int(dir)-1]
+
 def calculate_nondirectional_cordon(job):
     ###
     ### we want to "pair off" appearances of a vehicle. So if there are 4 appearances of a vehicle, we pair them off as
@@ -950,9 +964,12 @@ def calculate_cordon_in_out_only(job,checkboxes):
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
+    print("fulldf")
+    print(fullDf.head())
     for index in range(0,len(times)-1,2):
         print("Processing times",times[index],times[index+1])
         temp = fullDf.between_time(times[index],times[index+1],include_end=False)
+        print("temp",temp.head())
         temp.index.name= "Date"
         temp.reset_index(inplace=True)
         temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
@@ -995,7 +1012,6 @@ def calculate_cordon_in_out_only(job,checkboxes):
     if not job["durationsDictionary"] is None:
         for k, v in job["durationsDictionary"].items():
             i, o = k
-            print("durations,",i,o,v)
             splitTime = v.split(":")
             hours = int(splitTime[0])
             mins = int(splitTime[1])
@@ -1021,12 +1037,8 @@ def calculate_cordon_in_out_only(job,checkboxes):
         resultsDict[r[0]] = [r[1]]
     result = list(zip(aggs.index.values, aggs.values.tolist()))
     for r in result:
-        #print("looking at ",r)
         for val in r[1]:
-            #print("adding",val)
             resultsDict[r[0]].append(val)
-            #print("result",resultsDict[r[0]])
-    print(resultsDict)
     temp["duration"] = temp["duration"].apply(format_timedelta)
     temp = temp[["VRN","Class","newMovement","Date","outMovement","outTime","duration"]]
     temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
@@ -1034,13 +1046,23 @@ def calculate_cordon_in_out_only(job,checkboxes):
         temp.to_csv(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Cordon - in-out directional " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv",header=["VRN","Class","In Movement","Time","Out Movement","Time","Duration"],index=False)
     except PermissionError as e:
         messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
-    print(result)
     return [resultsDict,inTotals[0].values.tolist(),outTotals[0].values.tolist()]
 
-def calculate_route_assignment_split_by_in_out(job):
-    global df, backgroundThread
+def calculate_cordon_traversal_split_by_in_out(job,filters=None):
+    ###
+    ### Cordon Traversal
+    ###
 
+    global df, backgroundThread
+    print("filters are ",filters)
+    filtered = []
     outputFolder = os.path.join(job["folder"], "output")
+    try:
+        os.remove(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Cordon Traversal - split by in-out " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv")
+    except PermissionError as e:
+        pass
+    except FileNotFoundError as e:
+        pass
     result = []
     fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
     fullDf = fullDf[fullDf["Class"].notnull()]
@@ -1048,6 +1070,8 @@ def calculate_route_assignment_split_by_in_out(job):
              + job["timeperiod4"].split("-") if x != ""]
     for index in range(0,len(times)-1,2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        if len(temp)==0:
+            continue
         temp.index.name = "Date"
         temp.reset_index(inplace=True)
         temp = temp[temp["newMovement"] >= 0]
@@ -1084,9 +1108,14 @@ def calculate_route_assignment_split_by_in_out(job):
 
         temp = temp.merge(matchedDf, how="left", left_index=True, right_index=True)
         del temp["matched_x"]
+        print("---")
+        print(temp.head())
+        temp["newMovement"] = temp["newMovement"].astype(int)
 
         ###
         ### group the dataframe by plate, then aggregate each group into comma separated fields
+        ###
+
         strJoin = lambda x: ",".join(x.astype(str))
         dateJoin = lambda x: ",".join(x.apply(date_to_time))
         temp = temp.groupby(["VRN", "Class"]).agg({"Date": dateJoin, "newMovement": strJoin,"matched_y":strJoin})
@@ -1094,22 +1123,28 @@ def calculate_route_assignment_split_by_in_out(job):
         temp = temp[["VRN","Class","newMovement","Date","matched_y"]]
         values=temp.values.tolist()
 
+        print()
+        temp.sort_values(by=["VRN"],inplace=True)
+        print(temp)
         ###
         ### process the comma separated fields so that we split up each journey between an in and an out
         ###
 
+
+        count = 0
         for v in values:
             for i in range(2, 5):
                 v[i] = [item for item in v[i].split(",")]
-            print(v)
             index = 0
             while index < len(v[4]):
                 journey=[v[0],v[1]]
+                selectedJourney = [] ### to keep a track of the split journey
                 try:
                     index = v[4][index:].index("Y") + index
                     while v[4][index] != "N":
                         journey.append(v[2][index])
                         journey.append(v[3][index])
+                        selectedJourney.append(v[2][index])
                         index+=1
                 except ValueError as e:
                     break
@@ -1120,13 +1155,49 @@ def calculate_route_assignment_split_by_in_out(job):
                 ###
                 journey.append(v[2][index])
                 journey.append(v[3][index])
-                result.append(journey)
+                selectedJourney.append(v[2][index]) ### selectedJourney now holds the list of movements for a cordon traversal
+                if not filters is None:
+                    if list(map(int, selectedJourney)) in filters:
+                        filtered.append(journey)
+                        count += 1
+                        print()
+                else:
+                    filtered.append(journey)
 
-    with open(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Route Assignment - all journeys - split by in-out " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerows(result)
 
-def calculate_route_assignment_fs_ls(job):
+
+    ###
+    ### durations check
+    ###
+
+    print(filtered[:20])
+
+    result = []
+    for journey in filtered:
+        diffs = [(int(item),int(journey[i+2]),datetime.datetime.strptime(journey[i+3],"%H:%M:%S")- datetime.datetime.strptime(journey[i+1],"%H:%M:%S")) for i,item in enumerate(journey) if i%2==0 and i >=2 and i< len(journey)-2]
+        flag = True
+        for d in diffs:
+            splitTime = job["durationsDictionary"][d[0],d[1]].split(":")
+            hours = int(splitTime[0])
+            mins = int(splitTime[1])
+            td = datetime.timedelta(hours=hours, minutes=mins, seconds=0)
+            if d[2] > td:
+                flag=False
+        if flag:
+            result.append(journey)
+
+
+    print(result[:20])
+
+    try:
+        with open(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Cordon Traversal - split by in-out " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(result)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
+def calculate_route_assignment_fs_ls(job,filters=None):
     global df,backgroundThread
     ###
     ### we simply want to document the very first time a vehicle was seen, and the very last time it was seen
@@ -1141,13 +1212,18 @@ def calculate_route_assignment_fs_ls(job):
     ### set up a background thread to process and run the full routes calculation, since that is time consuming
     ### if it has already been run ( full route data.pkl exists in the folder) then we dont need to run it again
     ###
+    if backgroundThread is None:
+        print("thread is None")
+    else:
+        print(backgroundThread.is_alive())
     if not os.path.isfile(dataFolder + "/complete routes data.pkl"):
         if backgroundThread is None or not backgroundThread.is_alive():
             print("starting up thread")
-            backgroundThread = threading.Thread(target=calculate_route_assignment_full_routes,args=(job,))
+            backgroundThread = threading.Thread(target=calculate_route_assignment_full_routes,args=(job,filters))
             backgroundThread.start()
     else:
-        pass
+        print("already exists")
+
     inMov = []
     outMov = []
 
@@ -1175,14 +1251,16 @@ def calculate_route_assignment_fs_ls(job):
         ###
         grp = temp.groupby(["VRN"])
         result1 = temp[grp.cumcount() == 0]
-
+        print(result1.head())
         ###
         ### find last occurence of a plate
         ###
         result2 = temp[grp.cumcount(ascending=False) == 0]
+        print(result2.head())
         fullResult = pd.concat([result1, result2])
-
+        print(fullResult)
         fullResult.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+        print(fullResult.head())
         fullResult["outTime"] = fullResult["Date"].shift(-1)
         fullResult["newMovement"] = fullResult["newMovement"].real.astype(int)
         fullResult["outMovement"] = fullResult["newMovement"].shift(-1)
@@ -1201,13 +1279,12 @@ def calculate_route_assignment_fs_ls(job):
     aggs["duration", "<lambda>"] = aggs["duration"]["<lambda>"].apply(format_timedelta)
 
 
-    result = [list(zip(counts.index.values, counts.values.tolist()))]
-    for item in result[0]:
-        i, o = item[0]
-        if i not in inMov:
-            inMov.append(i)
-        if o not in outMov:
-            outMov.append(o)
+    for site, details in job["sites"].items():
+        for mvmtNo, mvmt in details.items():
+            if not int(mvmt["newmovement"]) in inMov:
+                inMov.append(int(mvmt["newmovement"]))
+            if not int(mvmt["newmovement"]) in outMov:
+                outMov.append(int(mvmt["newmovement"]))
     inMov = sorted(inMov)
     outMov = sorted(outMov)
 
@@ -1226,7 +1303,7 @@ def calculate_route_assignment_fs_ls(job):
     for r in result:
         for val in r[1]:
             resultsDict[r[0]].append(val)
-    print(resultsDict)
+
 
     temp["duration"] = temp["duration"].apply(format_timedelta)
     del temp["Movement"]
@@ -1239,8 +1316,8 @@ def calculate_route_assignment_fs_ls(job):
         temp.to_csv(outputFolder + "/" + job["jobno"] + " " + job["jobname"] + " Route Assignment - first seen last seen " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv",
                     header=["VRN", "Class", "In Movement", "Time", "Out Movement", "Time", "Duration"],index=False)
     except PermissionError as e:
-        messagebox.showinfo(
-            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+        messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
     return [resultsDict, inTotals[0].values.tolist(), outTotals[0].values.tolist()]
 
 def calculate_route_assignment_journey_pairs(job):
@@ -1323,24 +1400,39 @@ def calculate_route_assignment_journey_pairs(job):
     except PermissionError as e:
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    print("in totals are ",inTotals[0].values.tolist())
     return [resultsDict, inTotals[0].values.tolist(), outTotals[0].values.tolist()]
 
-def calculate_route_assignment_full_routes(job):
+def calculate_route_assignment_full_routes(job,filters):
     ###
     ### each vehicle enters the cordon at a site, travels through a number of sites, and exits at a site
-    ### we want to track and output the full journey taken by each vehicle, recording the each movement it passed through
+    ### we want to track and output the full journey taken by each vehicle, recording each movement it passed through
     ### and the time seen at that movement
     ###
-    global df
+    global df,backgroundThread
     inMov = []
     outMov = []
     outputFolder = os.path.join(job["folder"], "output")
     dataFolder = os.path.join(job["folder"], "data")
+
+    ###
+    ### we also want to calculate the journeys, with the full journeys split by any in-outs
+    ### ie Cordon Traversal
+    ###
+
+    calculate_cordon_traversal_split_by_in_out(job, filters)
+
+    ###
+    ### now do the full routes
+    ###
+
+
     fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
     fullDf = fullDf[fullDf["Class"].notnull()]
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
+    result = []
     for index in range(0,len(times)-1,2):
         temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
         temp.index.name = "Date"
@@ -1354,53 +1446,105 @@ def calculate_route_assignment_full_routes(job):
         print("before removing singletons", len(temp))
         temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
         print("after removing", len(temp))
-        dataframes.append(temp)
-    temp = pd.concat(dataframes)
-    print(temp.head())
+
+        ###
+        ### group by VRN, and then join each group together into 1 row in a dataframe
+        ### giving us the full journey travelled by that vehicle
+        ###
+
+        strJoin = lambda x: ",".join(x.astype(str))
+        dateJoin = lambda x: ",".join(x.apply(date_to_time))
+        temp = temp.groupby(["VRN", "Class"]).agg({"newMovement": strJoin, "Date": dateJoin})
+        temp.to_pickle(dataFolder + "/all journey pairs.pkl")
+        temp.reset_index(inplace=True)
+
+        values = temp.values.tolist()
+
+        for v in values:
+            for i in range(2, 4):
+                v[i] = [item for item in v[i].split(",")]
+            l = [item for sublist in list(zip(*[v[2], v[3]])) for item in sublist]
+            l.insert(0, l[-1])
+            l.insert(0, l[-2])
+            l.insert(0, l[3])
+            l.insert(0, l[3])
+            l.insert(0, v[1])
+            l.insert(0, v[0])
+            l.insert(6, "")
+            result.append(l)
+
+
+        #dataframes.append(temp)
+    #temp = pd.concat(dataframes)
+
+
+
+    ###
+    ### output the data to csv
+    ###
+    try:
+        with open(outputFolder + "/" + job["jobno"] + " " + job["jobname"] + " Route Assignment - all full journeys " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv" , "w",newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(result)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    print("finished thread")
+    backgroundThread = None
+
+def produce_full_routes(job):
+    ###
+    ### each vehicle enters the cordon at a site, travels through a number of sites, and exits at a site
+    ### we want to track and output the full journey taken by each vehicle, recording each movement it passed through
+    ### and the time seen at that movement
+    ###
+    global df,backgroundThread
+    inMov = []
+    outMov = []
+    outputFolder = os.path.join(job["folder"], "output")
+    dataFolder = os.path.join(job["folder"], "data")
+
+
+    temp = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    temp = temp[temp["Class"].notnull()]
+
+    dataframes = []
+    result = []
+
+    temp.index.name = "Date"
+    temp.reset_index(inplace=True)
+    temp = temp[temp["newMovement"] >= 0]
+    temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+    print(temp.head(20))
+    ###
+    ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
+    ###
+    print("before removing singletons", len(temp))
+    temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
+    print("after removing", len(temp))
+
     ###
     ### group by VRN, and then join each group together into 1 row in a dataframe
     ### giving us the full journey travelled by that vehicle
     ###
+
     strJoin = lambda x: ",".join(x.astype(str))
     dateJoin = lambda x: ",".join(x.apply(date_to_time))
-    print(temp.info())
-    temp = temp.groupby(["VRN","Class"]).agg({"Date":dateJoin,"newMovement":strJoin})
-    #temp = pd.read_pickle(job["folder"] + "/complete routes data.pkl")
-    print(temp.head())
-    temp.to_pickle(dataFolder+ "/all journey pairs.pkl")
+    dirJoin = lambda x: ",".join(x.apply(dir_to_str))
+    temp = temp.groupby(["VRN", "Class"]).agg({"newMovement": strJoin, "Date": dateJoin,"dir":dirJoin})
+    temp.to_pickle(dataFolder + "/all journey pairs.pkl")
     temp.reset_index(inplace=True)
-
+    temp = temp[["VRN","Class","Date","newMovement","dir"]]
     values = temp.values.tolist()
-    result = []
+    print(values[:2])
     for v in values:
-        for i in range(2,4):
-            v[i] =[item for item in v[i].split(",")]
-        #print("v is ",v)
-        l = [item for sublist in list(zip(*[v[2],v[3]])) for item in sublist]
+        result.append([v[0],v[1],list(zip(*[item.split(",") for item in v[2:]]))])
 
-        l.insert(0,l[-1])
-        l.insert(0, l[-2])
-        l.insert(0, l[3])
-        l.insert(0, l[3])
-        l.insert(0,v[1])
-        l.insert(0, v[0])
-        l.insert(6,"")
-        #print(l)
-        result.append(l)
-    ###
-    ### output the data to csv
-    ###
-
-    with open(outputFolder + "/" + job["jobno"] + " " + job["jobname"] + " Route Assignment - all full journeys " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv" , "w",newline="") as f:
-        writer = csv.writer(f)
-        writer.writerows(result)
-
-    ###
-    ### we also want to calculate the journeys, with the full journeys split by any in-outs
-    ###
-    calculate_route_assignment_split_by_in_out(job)
-
+    with open(job["folder"] + "/data/all journeys.pkl", "wb") as f:
+        pickle.dump(result, f)
+    print(result[:2])
     print("finished thread")
+    backgroundThread = None
 
 def calculate_overtaking(job,movementPair):
     global df
@@ -1663,15 +1807,6 @@ def get_platoon(dt,platooningTime):
         platoon+=1
         return platoon
 
-def practice(series):
-    print("______HEREHHHHH______________")
-    print(series)
-    print(type(series))
-    if len(series)==0:
-        return 0
-    print(series.value_counts())
-    return series.value_counts()
-
 def platooning_resample_method(s):
     ###
     ### s is a pandas Series object
@@ -1835,12 +1970,35 @@ def test():
     global df,overviewDf
 
 
+
+
+
     myDB.set_file("C:/Users/NWatson/PycharmProjects/ANPR/blah.sqlite")
-    job = myDB.load_job("3102-SCO","Isle Of Man v2","06/10/16")
+    job = myDB.load_job("3473-TAD","Oundle Road","20/10/16")
     load_job(job)
-    print(len(df))
+    produce_full_routes(job)
+    exit()
+    print("lenth of df BEFORE plate restrictions", len(df))
+    job["platerestrictionpercentages"] = []
 
+    if len(df) != 0:
+        job["platerestrictionpercentages"].append(100)
+        print(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]))
+        job["platerestrictionpercentages"].append(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)])*100 / len(df))
+        job["platerestrictionpercentages"].append(len(df[(df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)])*100 / len(df))
+        job["platerestrictionpercentages"].append(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)])*100 / len(df))
 
+    print(job["platerestrictionpercentages"])
+    if job["platerestriction"] == 1:
+        return True
+    if job["platerestriction"] == 2:
+        mask = (df["VRN"].len() >= 4) & (df["VRN"].len() <= 7)
+    if job["platerestriction"] == 3:
+        mask = (df["VRN"].len() >= 5) & (df["VRN"].len() <= 7)
+    if job["platerestriction"] == 4:
+        mask = (df["VRN"].len() >= 4) & (df["VRN"].len() <= 8)
+    df = df[mask]
+    print("lenth of df after plate restrictions", len(df))
 
     exit()
 
@@ -1913,7 +2071,7 @@ def test():
     exit()
 
 
-#test()
+test()
 
 win = mainwindow.mainWindow()
 win.setCallbackFunction("load unclassed",load_unclassed_plates)
