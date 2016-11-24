@@ -35,6 +35,7 @@ class mainWindow(tkinter.Tk):
         self.box2Value = 0 ### to keep track of the combo boxes on the comparison display sheet
         self.user = ""
         self.recalcuatePlatooningfunction = None
+        self.filteredMatchingfunction = None
         self.platooningTime = 5
         self.getJourneyPairsFunction = None
         self.getOvertakingDataFunction = None
@@ -398,6 +399,20 @@ class mainWindow(tkinter.Tk):
         else:
             self.get_journey_pairs_data(widget.current(), get_data=False)
 
+    def filtered_display_option_changed(self, event):
+        widget = event.widget
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+            label = self.nametowidget(self.winfo_children()[2])
+            frame = self.nametowidget(self.winfo_children()[1])
+        else:
+            label = self.nametowidget(self.winfo_children()[1])
+            frame = self.nametowidget(self.winfo_children()[0])
+        listbox = self.nametowidget((frame.winfo_children()[2]))
+        print(widget.get(), widget.current())
+        label = self.nametowidget(self.winfo_children()[1])
+
+        self.calculate_filtered_matching(listbox,widget.current(), get_data=False)
+
     def spawn_cordon_screen(self):
         for child in self.winfo_children():
             if type(self.nametowidget(child)) != tkinter.Toplevel:
@@ -516,6 +531,116 @@ class mainWindow(tkinter.Tk):
         print(filters)
         for journey in filters:
             lb.insert(tkinter.END,",".join(map(str,journey)))
+
+    def spawn_filter_matching_screen(self):
+        for child in self.winfo_children():
+            if type(self.nametowidget(child)) != tkinter.Toplevel:
+                child.destroy()
+        width = self.winfo_screenwidth() - 120
+        height = self.winfo_screenheight() - 50
+        frame = tkinter.Frame(self, bg="white")
+        box = ttk.Combobox(frame, width=10)
+        box["values"] = ("Count", "Max", "Min", "Avg")
+        box.bind("<<ComboboxSelected>>", self.filtered_display_option_changed)
+        box.grid(row=0, column=0,columnspan=3,sticky="n")
+        box.current(0)
+
+        e = tkinter.Entry(frame, width=15)
+        e.grid(row=1, column=0, padx=10, pady=10,columnspan = 3)
+        f = tkinter.font.Font(family="helvetica", size=8)
+        lb = tkinter.Listbox(frame, bg="white", font=f)
+        lb.bind("<Double-Button-1>",self.remove_filter)
+        lb.grid(row=2, column=0,columnspan =3)
+        e.bind("<Return>", lambda event: self.add_filter(event, lb))
+        tkinter.Button(frame, text="Clear", bg="white", height=1, width=5,command=lambda: lb.delete(0,tkinter.END)).grid(row=3, column=0, pady=10)
+        tkinter.Button(frame, text="Run", bg="white", height=1, width=5,command=lambda: self.calculate_filtered_matching(lb,0)).grid(row=3, column=1, pady=10)
+        var = tkinter.IntVar()
+        check = tkinter.Checkbutton(frame,text = "Duration Check",bg="white",font=f,command=lambda:self.duration_check_selected(var),variable=var)
+        check.grid(row=4,column=0,columnspan=3)
+        check.var = var
+        self.durationVar = tkinter.IntVar()
+        tkinter.Radiobutton(frame,text = "Split   ",bg="white",font=f,variable=self.durationVar,value =1,state="disabled").grid(row=5,column=0,columnspan=3)
+        tkinter.Radiobutton(frame, text="Discard", bg="white", font=f, variable=self.durationVar, value=2,state="disabled").grid(row=6,column=0,columnspan=3)
+        self.durationVar.set(1)
+        tkinter.Button(frame, text="Back", bg="white", height=1, width=5,command=self.spawn_home_window).grid(row=7, column=0, padx=10, pady=10,columnspan =3)
+        frame.grid(row=0, column=0, padx=20, pady=10, sticky="w", rowspan=5)
+        tkinter.Label(self, bg="white", text="Filtered Matching").grid(row=0, column=1)
+        frame = tkinter.Frame(self, bg="white", relief=tkinter.GROOVE, borderwidth=3, width=800, height=800)
+        frame.grid(row=1, column=1,sticky="n")
+        frame.grid_propagate(False)
+        self.matrix = matrix.MatrixDisplay(frame, width, height)
+
+    def duration_check_selected(self,var):
+        value = var.get()
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+
+            frame = self.nametowidget(self.winfo_children()[1])
+        else:
+            frame = self.nametowidget(self.winfo_children()[0])
+        for child in frame.winfo_children():
+            widget = self.nametowidget(child)
+            if type(self.nametowidget(child)) == tkinter.Radiobutton:
+                if value == 1:
+                    widget.configure(state="normal")
+                else:
+                    widget.configure(state="disabled")
+
+    def remove_filter(self,event):
+        lb = event.widget
+        if len(lb.curselection())==0:
+            return
+        lb.delete(lb.curselection()[0])
+
+    def calculate_filtered_matching(self,lb,index,get_data=True):
+        filters = []
+        durationCheck = 0
+        for row in lb.get(0, tkinter.END):
+            try:
+                filters.append(row)
+            except Exception as e:
+                pass
+
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+            frame = self.nametowidget(self.winfo_children()[1])
+        else:
+            frame = self.nametowidget(self.winfo_children()[0])
+        for child in frame.winfo_children():
+            widget = self.nametowidget(child)
+            if type(self.nametowidget(child)) == tkinter.Checkbutton:
+                durationCheck= widget.var.get()
+
+        if get_data:
+            print("getting non directional data")
+            self.matrixData = self.filteredMatchingfunction(self.currentJob,filters,durationCheck,self.durationVar.get())
+        inMov = []
+        outMov = []
+
+
+        print("radio button selected",self.durationVar.get())
+        for key, item in self.matrixData[0].items():
+            if not int(key[0]) in inMov:
+                inMov.append(int(key[0]))
+            if not int(key[1]) in outMov:
+                outMov.append(int(key[1]))
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        box = self.nametowidget(frame.winfo_children()[0])
+        box.current(index)
+        print(inMov,outMov)
+        data = {}
+        for k, v in self.matrixData[0].items():
+            data[k] = v[index]
+        if index == 0:
+            for i, mov in enumerate(inMov):
+                data[(mov, "total")] = int(self.matrixData[1][i])
+            for i, mov in enumerate(outMov):
+                data[("total", mov)] = int(self.matrixData[2][i])
+            inMov.append("total")
+            outMov.append("total")
+            data[("total", "total")] = int(sum(self.matrixData[1]))
+            self.matrix.draw(inMov, outMov, data)
+        else:
+            self.matrix.draw(inMov, outMov, data, fontsize=6)
 
     def spawn_duration_matrix_screen(self):
 
@@ -812,125 +937,6 @@ class mainWindow(tkinter.Tk):
             self.matrix.draw(inMov,outMov,data)
         else:
             self.matrix.draw(inMov, outMov, data,fontsize=6)
-
-    def draw_matrix(self,data,inMov,outMov,index):
-
-        ###
-        ###
-        ###
-        ###
-        ###
-        canvas = self.matrixCanvasList[0]
-        leftCanvas = self.matrixCanvasList[1]
-        topCanvas = self.matrixCanvasList[2]
-        columnWidth = 50
-        rowHeight = 30
-        fontsize = 8
-        noOfCols = len(outMov)
-        noOfRows = len(inMov)
-        x, y = 0, 0
-        scrollBarWidth = 30
-        f = tkinter.font.Font(family="helvetica", size=fontsize)
-        titleFont = tkinter.font.Font(family="helvetica", size=12, weight="bold")
-        canvas.delete(tkinter.ALL)
-        leftCanvas.delete(tkinter.ALL)
-        topCanvas.delete(tkinter.ALL)
-        canvasHeight = (noOfRows +1)* rowHeight
-        canvasWidth = (noOfCols + 1) * columnWidth
-        displayWidth = self.winfo_width() - 250
-        displayHeight = self.winfo_height() - 20
-        print("setting display to ", displayWidth, displayHeight)
-        if displayWidth > canvasWidth+ (2 * columnWidth) + scrollBarWidth:
-            displayWidth = canvasWidth + (2 * columnWidth) + scrollBarWidth
-        if displayHeight > canvasHeight+ ( 2 * rowHeight) + scrollBarWidth :
-            displayHeight = canvasHeight + ( 2 * rowHeight) + scrollBarWidth
-
-        print("setting display to ",displayWidth,displayHeight)
-        print("canvas settings are",canvasWidth,canvasHeight)
-        #x += columnWidth
-        #y += rowHeight + 10
-
-        ###
-        ### draw lines and text for rows on grid
-        ###
-        for mov in inMov:
-            canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
-            y = y + rowHeight / 2
-            leftCanvas.create_text(x + columnWidth / 2, y, text=mov, font=f)
-            y = y + rowHeight / 2
-        canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
-        y = y + rowHeight / 2
-        leftCanvas.create_text(x - columnWidth / 2, y, text="Total", font=f)
-        y = y + rowHeight / 2
-        canvas.create_line(x, y, x + ((noOfCols + 1) * columnWidth), y)
-
-        ###
-        ### draw lines and text for columns on grid
-        ###
-        x, y = 0,0
-
-        #x += columnWidth
-        #y += rowHeight + 10
-        for mov in outMov:
-            canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
-            x = x + columnWidth / 2
-            topCanvas.create_text(x, y + rowHeight / 2, text=mov, font=f)
-            x = x + columnWidth / 2
-        canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
-        x = x + columnWidth / 2
-        topCanvas.create_text(x, y - rowHeight / 2, text="Total", font=f)
-        x = x + columnWidth / 2
-        canvas.create_line(x, y, x, y + ((noOfRows + 1) * rowHeight))
-
-        ###
-        ### display data
-        ###
-        if index != 0:
-            fontsize-=2
-        dataFont = tkinter.font.Font(family="verdana", size=fontsize)
-        totalFont = tkinter.font.Font(family="verdana", size=fontsize)
-        x, y = 0,0
-        for key,data in data[0].items():
-            #print(key,data)
-            i, o = key
-            displayedValue = data[index]
-            try:
-                row = inMov.index(i) + 1
-            except ValueError as e:
-                print("error in ", key,data)
-                continue
-            try:
-                column = outMov.index(o) + 1
-            except ValueError as e:
-                print("error in ", key,data)
-                continue
-            canvas.create_text((x + (columnWidth * column) - columnWidth / 2),
-                               (y + (rowHeight * row) - rowHeight / 2),
-                               text=displayedValue, font=dataFont)
-        if index == 0:
-            column, row = noOfCols, 1
-            print(self.matrixData[1])
-            for value in self.matrixData[1]:
-                canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
-                                   (y + (rowHeight * row) - rowHeight / 2),
-                                   text=int(value), font=totalFont, fill="green")
-                row += 1
-
-            column, row = 0, noOfRows + 1
-            for value in self.matrixData[2]:
-                canvas.create_text((x + (columnWidth * column) + columnWidth / 2),
-                                   (y + (rowHeight * row) - rowHeight / 2),
-                                   text=int(value), font=totalFont, fill="red")
-                column += 1
-            column, row = noOfCols, noOfRows + 1
-            canvas.create_text((x + (columnWidth * column) + columnWidth / 2), (y + (rowHeight * row) - rowHeight / 2),
-                               text=int(sum(self.matrixData[1])), font=totalFont, fill="blue")
-        parent = canvas.winfo_parent()
-        parent = self.nametowidget(parent)
-        leftCanvas.configure(width = columnWidth,height =displayHeight-rowHeight -scrollBarWidth ,scrollregion=(0, 0, canvasWidth , canvasHeight ))
-        topCanvas.configure( height=rowHeight, width=displayWidth-columnWidth-scrollBarWidth,scrollregion=(0, 0, canvasWidth , canvasHeight ))
-        canvas.configure(width=displayWidth-columnWidth-scrollBarWidth, height=displayHeight-rowHeight -scrollBarWidth,scrollregion=(0, 0, canvasWidth , canvasHeight ))
-        parent.configure(width=displayWidth,height=displayHeight)
 
     def scroll_matrix_screen(self,event):
         print(event)
@@ -1560,6 +1566,9 @@ class mainWindow(tkinter.Tk):
                                                                                                  padx=20, pady=20)
         tkinter.Button(frame, text="Duplicate Removal/ \nTime Adjustments", width=17, height=3, bg="white",command=self.spawn_duplicates_window).grid(row=4, column=2,padx=20,
                                                                                                         pady=20)
+        tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=4, column=3, padx=20, pady=20, sticky="e")
+
+
         #tkinter.Button(frame, text="Time \n Adjustments", width=17, height=3, bg="white",command=self.spawn_time_adjustments_screen).grid(row=4, column=3, padx=20,
                                                                                                                         #pady=20,sticky="e")
 
@@ -1577,8 +1586,10 @@ class mainWindow(tkinter.Tk):
                                                                                                      padx=20, pady=20)
         tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,
                                                                                              pady=20)
-        tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=8, column=3, padx=20,
-                                                                                      pady=20,sticky="e")
+        tkinter.Button(frame, text="Filtered\nMatching", width=17, height=3, bg="white",command=self.spawn_filter_matching_screen).grid(row=8, column=3, padx=20,pady=20)
+
+
+
 
         tkinter.Button(frame, text="Back", width=10, height=1, bg="white",command = self.spawn_survey_setup_screen).grid(row=9, column=0, padx=20,
                                                                                       pady=20)
@@ -2574,6 +2585,8 @@ class mainWindow(tkinter.Tk):
             self.updateDataFunction = fun
         if text == "recalculate platooning":
             self.recalcuatePlatooningfunction = fun
+        if text == "filtered matching":
+            self.filteredMatchingfunction = fun
 
 
 def format_timedelta(td):

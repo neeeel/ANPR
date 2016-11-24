@@ -12,6 +12,7 @@ import time
 import csv
 import threading
 import shutil
+import anprregex
 
 
 flag = False
@@ -287,6 +288,7 @@ def load_classes(job):
         df.to_csv("dumped.csv")
         myDB.update_job_with_progress(job["id"], "classed")
         compute_comparison_data(job)
+        threading.Thread(target=produce_full_routes,args=(job,)).start()
     except FileNotFoundError as e:
         messagebox.showinfo(message="Something went wrong when trying to load the classes, please check that the file is a valid file")
         df = None
@@ -1035,6 +1037,8 @@ def calculate_cordon_in_out_only(job,checkboxes):
     result = list(zip(counts.index.values, counts.values.tolist()))
     for r in result:
         resultsDict[r[0]] = [r[1]]
+    print(resultsDict)
+    print(inTotals[0].values.tolist())
     result = list(zip(aggs.index.values, aggs.values.tolist()))
     for r in result:
         for val in r[1]:
@@ -1503,48 +1507,146 @@ def produce_full_routes(job):
     outMov = []
     outputFolder = os.path.join(job["folder"], "output")
     dataFolder = os.path.join(job["folder"], "data")
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
+             + job["timeperiod4"].split("-") if x != ""]
 
-
-    temp = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
-    temp = temp[temp["Class"].notnull()]
-
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
     dataframes = []
     result = []
+    for index in range(0, len(times) - 1, 2):
+        print("checking times",times[index],times[index+1])
+        temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        temp = temp[temp["Class"].notnull()]
+        temp.index.name = "Date"
+        temp.reset_index(inplace=True)
+        temp = temp[temp["newMovement"] >= 0]
+        temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
 
-    temp.index.name = "Date"
-    temp.reset_index(inplace=True)
-    temp = temp[temp["newMovement"] >= 0]
-    temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
-    print(temp.head(20))
-    ###
-    ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
-    ###
-    print("before removing singletons", len(temp))
-    temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
-    print("after removing", len(temp))
+        ###
+        ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
+        ###
+        print("before removing singletons", len(temp))
+        temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
+        print("after removing", len(temp))
 
-    ###
-    ### group by VRN, and then join each group together into 1 row in a dataframe
-    ### giving us the full journey travelled by that vehicle
-    ###
 
-    strJoin = lambda x: ",".join(x.astype(str))
-    dateJoin = lambda x: ",".join(x.apply(date_to_time))
-    dirJoin = lambda x: ",".join(x.apply(dir_to_str))
-    temp = temp.groupby(["VRN", "Class"]).agg({"newMovement": strJoin, "Date": dateJoin,"dir":dirJoin})
-    temp.to_pickle(dataFolder + "/all journey pairs.pkl")
-    temp.reset_index(inplace=True)
-    temp = temp[["VRN","Class","Date","newMovement","dir"]]
-    values = temp.values.tolist()
-    print(values[:2])
-    for v in values:
-        result.append([v[0],v[1],list(zip(*[item.split(",") for item in v[2:]]))])
+        ###
+        ### group by VRN, and then join each group together into 1 row in a dataframe
+        ### giving us the full journey travelled by that vehicle
+        ###
 
-    with open(job["folder"] + "/data/all journeys.pkl", "wb") as f:
+        strJoin = lambda x: ",".join(x.astype(str))
+        dateJoin = lambda x: ",".join(x.apply(date_to_time))
+        dirJoin = lambda x: ",".join(x.apply(dir_to_str))
+        temp = temp.groupby(["VRN", "Class"]).agg({"newMovement": strJoin, "Date": dateJoin,"dir":dirJoin})
+        temp.to_pickle(dataFolder + "/all full routes.pkl")
+        temp.reset_index(inplace=True)
+        temp = temp[["VRN","Class","Date","newMovement","dir"]]
+        values = temp.values.tolist()
+        print(values[:2])
+        for v in values:
+            result.append([v[0],v[1],list(zip(*[item.split(",") for item in v[2:]]))])
+
+    with open(job["folder"] + "/data/all journeys as list.pkl", "wb") as f:
         pickle.dump(result, f)
     print(result[:2])
     print("finished thread")
     backgroundThread = None
+
+def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
+    dataFolder = os.path.join(job["folder"], "data")
+    outputFolder = os.path.join(job["folder"], "output")
+    journeys = pd.read_pickle(dataFolder + "/all journeys as list.pkl")
+
+    result = []
+    for journey in journeys:
+        data = journey[2]
+        for f in filters:
+            matches = anprregex.match(data,f)
+            for m in matches:
+                output = []
+                output.append(journey[0])
+                output.append(journey[1])
+                temp =([(item[1],item[0]) for item in m])
+                temp = [item for sublist in temp for item in sublist]
+                [output.append(item) for item in temp]
+                if not output in result:
+                    result.append(output)
+
+    if durationCheck:
+        if not job["durationsDictionary"] is None:
+            for journey in result:
+                #print("checking journey",journey)
+                start=2
+                while start < len(journey) -2:
+                    #print("start is",start,len(journey) -1)
+                    #print(datetime.datetime.strptime(journey[start + 1], "%H:%M:%S"))
+                    #print(datetime.datetime.strptime(journey[start + 3], "%H:%M:%S"))
+                    duration = datetime.datetime.strptime(journey[start + 3], "%H:%M:%S") - datetime.datetime.strptime(journey[start + 1], "%H:%M:%S")
+                    #print("duration is",duration,(int(journey[start]),int(journey[start+2])),job["durationsDictionary"][(int(journey[start]),int(journey[start+2]))])
+                    v = job["durationsDictionary"][(int(journey[start]),int(journey[start+2]))]
+                    splitTime = v.split(":")
+                    hours = int(splitTime[0])
+                    mins = int(splitTime[1])
+                    td = datetime.timedelta(hours=hours, minutes=mins, seconds=0)
+                    if duration > td:
+                        if durationBehaviour ==1: ## split any journeys where a leg exceeds the duration
+                            newJourney = [journey[0], journey[1]]
+                            [newJourney.append(item) for item in journey[start + 2:]]
+                            #print("splitting, old journey is ", journey)
+                            while len(journey) > start + 2:
+                                del journey[-1]
+                            if len(newJourney) >4:
+                                result.append(newJourney)
+                            if len(journey) < 5:
+                                while len(journey) > 0:
+                                    del journey[-1]
+                            #print("journey is now",journey,"added journey",newJourney)
+                        else: ### discard any journeys where a leg exceeds the duration
+                            #print("discarding",journey)
+                            while len(journey) > 0:
+                                del journey[-1]
+                    start+=2
+        result = [item for item in result if item !=[]]
+
+
+    try:
+        with open(outputFolder + "/" + job["jobno"] + " " + job[
+            "jobname"] + " Filtered Matching - all matches " + datetime.datetime.strftime(job["surveydate"],"%d-%m-%Y") + ".csv","w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(result)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
+    resultsDict ={}
+    for r in result:
+        resultsDict[(int(r[2]), int(r[-2]))] = resultsDict.get((int(r[2]), int(r[-2])), [])
+        resultsDict[(int(r[2]), int(r[-2]))].append(datetime.datetime.strptime(r[-1], "%H:%M:%S") - datetime.datetime.strptime(r[3], "%H:%M:%S"))
+
+    inMov = []
+    outMov = []
+    for key,item in resultsDict.items():
+        if not key[0] in inMov:
+            inMov.append(key[0])
+        if not key[1] in outMov:
+            outMov.append(key[1])
+
+    ###
+    ### set up some indexes so that if any sites have 0 values, we still pick up the sites in the dataframe
+    ##
+    inDf = pd.DataFrame(index=inMov)
+    outDf = pd.DataFrame(index=outMov)
+
+    inDf["count"] = 0
+    outDf["count"] = 0
+    for key,item in resultsDict.items():
+        resultsDict[key] = [len(item),max(item),min(item),format_timedelta(np.mean(item))]
+        inDf.loc[int(key[0])]["count"]+=len(item)
+        outDf.loc[int(key[1])]["count"] += len(item)
+    inDf.sort_index(inplace=True)
+    outDf.sort_index(inplace=True)
+    return(resultsDict,inDf["count"].tolist(),outDf["count"].tolist())
 
 def calculate_overtaking(job,movementPair):
     global df
@@ -1974,9 +2076,10 @@ def test():
 
 
     myDB.set_file("C:/Users/NWatson/PycharmProjects/ANPR/blah.sqlite")
-    job = myDB.load_job("3473-TAD","Oundle Road","20/10/16")
+    job = myDB.load_job("3105-IRE","Coldcut","07/10/16")
     load_job(job)
-    produce_full_routes(job)
+    #produce_full_routes(job)
+    calculate_regex_matching(job,["I-(B-O)"])
     exit()
     print("lenth of df BEFORE plate restrictions", len(df))
     job["platerestrictionpercentages"] = []
@@ -2071,7 +2174,7 @@ def test():
     exit()
 
 
-test()
+#test()
 
 win = mainwindow.mainWindow()
 win.setCallbackFunction("load unclassed",load_unclassed_plates)
@@ -2089,5 +2192,6 @@ win.setCallbackFunction("get overtaking data",calculate_overtaking)
 win.setCallbackFunction("resample overtaking data",resample_overtaking_data)
 win.setCallbackFunction("update data after job save",update_sites_and_movements)
 win.setCallbackFunction("recalculate platooning",calculate_platooning)
+win.setCallbackFunction("filtered matching",calculate_regex_matching)
 
 win.mainloop()
