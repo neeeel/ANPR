@@ -27,9 +27,10 @@ def update_sites_and_movements(job):
     ###
     print("updating",job)
     dataFolder = os.path.join(job["folder"], "data")
+    job = myDB.load_job(job["jobno"],job["jobname"],datetime.datetime.strftime(job["surveydate"],"%d/%m/%y"))
+    job["timeAdjustmentsDictionary"] = {}
     load_job(job)
     if not df is None:
-        load_job(job)
         df["Site"] = df["Movement"].apply(convert_movement_to_site, args=(job,))
         df["newMovement"] = df["Movement"].apply(convert_old_movement_to_new, args=(job,))
         df["dir"] = df["newMovement"].apply(convert_movement_to_dir, args=(job,))
@@ -38,6 +39,7 @@ def update_sites_and_movements(job):
             os.remove(dataFolder + "/comparisondata.pkl")
         except Exception as e:
             pass
+        threading.Thread(target=produce_full_routes, args=(job,)).start()
 
 def convert_movement_to_site(val,job):
     ###
@@ -147,7 +149,6 @@ def load_unclassed_plates(job):
     compute_comparison_data(job)
     load_job(job)
 
-
 def reset_project(job):
     dataFolder = os.path.join(job["folder"], "data")
     try:
@@ -181,6 +182,8 @@ def load_completed_count(job):
     classes.insert(0, "Time")
     numClasses = int(len(classes))
     file = filedialog.askopenfilename(initialdir=job["folder"])
+    if file == "":
+        return
     try:
         wb = openpyxl.load_workbook(file,data_only=True)
         for siteNo,siteDetails in job["sites"].items():
@@ -311,6 +314,7 @@ def load_job(job):
     global df,overviewDf
     ### load plates, classed or unclassed, from pickled dataframe file
     dataFolder = os.path.join(job["folder"], "data")
+    job["platerestrictionpercentages"] = [0, 0, 0, 0]
     try:
         df = pd.read_pickle(dataFolder + "/classedData.pkl")
         #print(df.info())
@@ -335,9 +339,7 @@ def load_job(job):
         overviewDf = pd.read_pickle(dataFolder + "/OVData.pkl")
         print("Loaded completed overview count")
     except FileNotFoundError as e:
-        # messagebox(message="Data file is missing, you will need to load the unclassed plates")
         print("No comparison data found")
-        #load_completed_count(job)
     except Exception as e:
         print(e)
         print("ERRRRRRRROR")
@@ -345,30 +347,40 @@ def load_job(job):
         return False
 
     ###
-    ### load durations dictionary, if it exists
+    ### restrict plates based on length
     ###
 
-    try:
-        with open(dataFolder + "/durations.pkl", "rb") as f:
-            job["durationsDictionary"] = pickle.load(f)
-    except Exception as e:
-        print(e)
+    print("lenth of df BEFORE plate restrictions", len(df))
+    job["platerestrictionpercentages"] = []
 
-    try:
-        with open(dataFolder + "/timeAdjustments.pkl", "rb") as f:
-            job["timeAdjustmentsDictionary"] = pickle.load(f)
-            print(job["timeAdjustmentsDictionary"])
-    except Exception as e:
-        print(e)
+    if len(df) != 0:
+        job["platerestrictionpercentages"].append(100)
+        #print(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]))
+        job["platerestrictionpercentages"].append(
+            float(
+                "{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
+        job["platerestrictionpercentages"].append(
+            float(
+                "{0:.2f}".format(len(df[(df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
+        job["platerestrictionpercentages"].append(
+            float(
+                "{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)]) * 100 / len(df))))
+    else:
+        job["platerestrictionpercentages"] = [0, 0, 0, 0]
+        return True
 
+    if job["platerestriction"] == 1:
+        pass
+    else:
+        if job["platerestriction"] == 2:
+            mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)
+        if job["platerestriction"] == 3:
+            mask = (df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)
+        if job["platerestriction"] == 4:
+            mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)
+        df = df[mask]
+    print("lenth of df after plate restrictions", len(df))
 
-
-
-    ###
-    ### TODO remove this section, just added for John Anderson site 3 was 10 seconds out
-    #df.reset_index(inplace=True)
-    #df.ix[df["newMovement"] == 3, "Date"] -= pd.Timedelta(seconds=10)
-    #df.set_index("Date",inplace=True)
 
     duplicates=[]
     for i in range(31):
@@ -386,6 +398,8 @@ def load_job(job):
     ### make any time adjustments
     ###
 
+
+
     df.reset_index(inplace=True)
     for k,v in job["timeAdjustmentsDictionary"].items():
         if v != 0:
@@ -393,35 +407,7 @@ def load_job(job):
     df.set_index("Date",inplace=True)
 
 
-    ###
-    ### restrict plates based on length
-    ###
-    print("lenth of df BEFORE plate restrictions", len(df))
-    job["platerestrictionpercentages"] = []
 
-    if len(df) != 0:
-        job["platerestrictionpercentages"].append(100)
-        print(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]))
-        job["platerestrictionpercentages"].append(
-            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
-        job["platerestrictionpercentages"].append(
-            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)]) * 100 / len(df))))
-        job["platerestrictionpercentages"].append(
-            float("{0:.2f}".format(len(df[(df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)]) * 100 / len(df))))
-    else:
-        job["platerestrictionpercentages"] = [0,0,0,0]
-        return True
-
-    if job["platerestriction"] == 1:
-        return True
-    if job["platerestriction"] == 2:
-        mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 7)
-    if job["platerestriction"] == 3:
-        mask = (df["VRN"].str.len() >= 5) & (df["VRN"].str.len() <= 7)
-    if job["platerestriction"] == 4:
-        mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)
-    df = df[mask]
-    print("lenth of df after plate restrictions", len(df))
     return True
 
 def bin_time(t):
@@ -1414,8 +1400,6 @@ def calculate_route_assignment_full_routes(job,filters):
     ### and the time seen at that movement
     ###
     global df,backgroundThread
-    inMov = []
-    outMov = []
     outputFolder = os.path.join(job["folder"], "output")
     dataFolder = os.path.join(job["folder"], "data")
 
@@ -1558,6 +1542,24 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     outputFolder = os.path.join(job["folder"], "output")
     journeys = pd.read_pickle(dataFolder + "/all journeys as list.pkl")
 
+    inMov = []
+    outMov = []
+    bothMov = []
+    for site, details in job["sites"].items():
+        for mvmtNo, mvmt in details.items():
+            if mvmt["dir"] ==1:
+                inMov.append(mvmt["newmovement"])
+            if mvmt["dir"] ==2:
+                outMov.append(mvmt["newmovement"])
+            if mvmt["dir"] ==3:
+                bothMov.append(mvmt["newmovement"])
+    inMov = sorted(inMov)
+    outMov = sorted(outMov)
+    bothMov = sorted(bothMov)
+    for f in filters:
+        pass
+
+
     result = []
     for journey in journeys:
         data = journey[2]
@@ -1580,8 +1582,6 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                 start=2
                 while start < len(journey) -2:
                     #print("start is",start,len(journey) -1)
-                    #print(datetime.datetime.strptime(journey[start + 1], "%H:%M:%S"))
-                    #print(datetime.datetime.strptime(journey[start + 3], "%H:%M:%S"))
                     duration = datetime.datetime.strptime(journey[start + 3], "%H:%M:%S") - datetime.datetime.strptime(journey[start + 1], "%H:%M:%S")
                     #print("duration is",duration,(int(journey[start]),int(journey[start+2])),job["durationsDictionary"][(int(journey[start]),int(journey[start+2]))])
                     v = job["durationsDictionary"][(int(journey[start]),int(journey[start+2]))]
@@ -1593,7 +1593,6 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                         if durationBehaviour ==1: ## split any journeys where a leg exceeds the duration
                             newJourney = [journey[0], journey[1]]
                             [newJourney.append(item) for item in journey[start + 2:]]
-                            #print("splitting, old journey is ", journey)
                             while len(journey) > start + 2:
                                 del journey[-1]
                             if len(newJourney) >4:
@@ -1603,7 +1602,6 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                                     del journey[-1]
                             #print("journey is now",journey,"added journey",newJourney)
                         else: ### discard any journeys where a leg exceeds the duration
-                            #print("discarding",journey)
                             while len(journey) > 0:
                                 del journey[-1]
                     start+=2

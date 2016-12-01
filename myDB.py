@@ -234,6 +234,10 @@ def load_job(jobNo,jobName,jobDate):
     job["folder"] = result[19]
     job["selectedduplicates"] = result[20]
     job["platerestriction"] = result[21]
+    job["platerestrictionpercentages"] = []
+    job["duplicateValues"] = []
+    job["timeAdjustmentsDictionary"] = {}
+    job["durationsDictionary"] = {}
     result = cur.execute("SELECT site.siteno,movement.combinedmovementnum,movement.originalmovementnum,movement.dir,movement.comment,movement.siteID FROM site JOIN job "
                          "ON site.jobno = job.ID JOIN Movement ON site.id = movement.siteid "
                          "WHERE job.id = ?",(job["id"],)).fetchall()

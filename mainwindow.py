@@ -592,6 +592,9 @@ class mainWindow(tkinter.Tk):
         lb.delete(lb.curselection()[0])
 
     def calculate_filtered_matching(self,lb,index,get_data=True):
+        ###
+        ### user can specify a list of filters to apply for matching
+        ###
         filters = []
         durationCheck = 0
         for row in lb.get(0, tkinter.END):
@@ -610,13 +613,9 @@ class mainWindow(tkinter.Tk):
                 durationCheck= widget.var.get()
 
         if get_data:
-            print("getting non directional data")
             self.matrixData = self.filteredMatchingfunction(self.currentJob,filters,durationCheck,self.durationVar.get())
         inMov = []
         outMov = []
-
-
-        print("radio button selected",self.durationVar.get())
         for key, item in self.matrixData[0].items():
             if not int(key[0]) in inMov:
                 inMov.append(int(key[0]))
@@ -756,6 +755,7 @@ class mainWindow(tkinter.Tk):
             i = int(i.replace("in","").strip())
             o = int(o.replace("out", "").strip())
             self.durationsDictionary[i,o]=text
+            print("setting value for",self.durationsDictionary[i,o],"to",text)
             with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
                 pickle.dump(self.durationsDictionary, f)
             self.draw_duration_matrix_screen()
@@ -973,6 +973,7 @@ class mainWindow(tkinter.Tk):
 
         for child in self.winfo_children():
             child.destroy()
+        self.wm_title("Project Setup")
         self.menubar = tkinter.Menu(self)
         menu = tkinter.Menu(self.menubar, tearoff=0)
         menu.add_command(label="Load Settings", command=self.spawn_settings_window)
@@ -1458,6 +1459,7 @@ class mainWindow(tkinter.Tk):
             print("failed to save to db")
             return
         job = myDB.load_job(job["jobno"],job["jobname"],job["surveyDate"])
+        job["timeAdjustmentsDictionary"] = {}
         self.updateDataFunction(job)
         self.spawn_survey_setup_screen()
 
@@ -1653,9 +1655,11 @@ class mainWindow(tkinter.Tk):
             w.insert(0,datetime.timedelta(seconds=prevValue))
 
     def open_project_folder(self):
-        p = os.path.normpath(self.currentJob["folder"])
-        # subprocess.Popen(r'explorer /n /select,"C:\Users\NWatson\Desktop\Oxford ANPR testing"' )
-        subprocess.Popen('explorer "{0}"'.format(p))
+        if os.path.isdir(self.currentJob["folder"]):
+            p = os.path.normpath(self.currentJob["folder"])
+            subprocess.Popen('explorer "{0}"'.format(p))
+        else:
+            messagebox.showinfo(message="Project folder doesnt exist")
 
     def comment_clicked(self,event):
         curItem = event.widget.identify_row(event.y)
@@ -2447,6 +2451,21 @@ class mainWindow(tkinter.Tk):
         inMov = sorted(inMov)
         outMov = sorted(outMov)
 
+
+        ###
+        ### make sure the data and output folders exist
+        ###
+
+        try:
+            os.mkdir(self.currentJob["folder"] + "/output")
+        except Exception as e:
+            print(e, type(e))
+        try:
+            os.mkdir(self.currentJob["folder"] + "/data")
+        except Exception as e:
+            print(e, type(e))
+
+
         ###
         ### each movement may have a slightly out time, depending on the settings on the camera
         ### so we may need to add or subtract a time delta from all reocords from a certain movement
@@ -2462,37 +2481,62 @@ class mainWindow(tkinter.Tk):
             for i in inMov:
                 timeAdjustmentsDictionary[i] = 0
             print("dict is", timeAdjustmentsDictionary)
-            with open(self.currentJob["folder"] + "/data/timeAdjustments.pkl", "wb") as f:
-                pickle.dump(timeAdjustmentsDictionary, f)
 
+
+        ###
+        ### make sure that all movements have an associated time adjustment value
+        ###
+
+        for i in inMov:
+            try:
+                print(timeAdjustmentsDictionary[i])
+            except KeyError as e:
+                timeAdjustmentsDictionary[i] = 0
+        with open(self.currentJob["folder"] + "/data/timeAdjustments.pkl", "wb") as f:
+            pickle.dump(timeAdjustmentsDictionary, f)
         self.currentJob["timeAdjustmentsDictionary"] = timeAdjustmentsDictionary
 
-        if not self.loadJobFunction(self.currentJob):
-            return
+        self.durationsDictionary = {}
+
         try:
             with open(self.currentJob["folder"] + "/data/durations.pkl", "rb") as f:
                 self.durationsDictionary = pickle.load(f)
         except IOError as e:
-            startTime = self.currentJob["timeperiod1"].split("-")[0]
-            endTime = self.currentJob["timeperiod1"].split("-")[1]
-            for i in range(2,5):
-                if self.currentJob["timeperiod" + str(i)].split("-")[1] != "":
-                    endTime = self.currentJob["timeperiod" + str(i)].split("-")[1]
-            print(startTime,endTime)
+            pass
+        startTime = self.currentJob["timeperiod1"].split("-")[0]
+        endTime = self.currentJob["timeperiod1"].split("-")[1]
+        for i in range(2,5):
+            if self.currentJob["timeperiod" + str(i)].split("-")[1] != "":
+                endTime = self.currentJob["timeperiod" + str(i)].split("-")[1]
+        print(startTime,endTime)
 
-            t = datetime.datetime.strptime(startTime, "%H:%M")
-            t1 = datetime.datetime.strptime(endTime, "%H:%M")
-            t =  format_timedelta(t1 - t)
-            self.durationsDictionary = {}
+        t = datetime.datetime.strptime(startTime, "%H:%M")
+        t1 = datetime.datetime.strptime(endTime, "%H:%M")
+        t =  format_timedelta(t1 - t)
 
-            self.durationsDictionary = {}
-            for i in inMov:
-                for o in outMov:
-                    self.durationsDictionary[i,o] =t
+
+        ###
+        ### make sure that all movement pairs have an associated duration value
+        ###
+
+        for i in inMov:
+            for o in outMov:
+                try:
+                    print(self.durationsDictionary[i, o])
+                except KeyError as e:
+                    print("key error in durations dictionary",i,o)
+                    self.durationsDictionary[i, o] = t
+
         self.currentJob["durationsDictionary"] = self.durationsDictionary
         with open(self.currentJob["folder"] + "/data/durations.pkl", "wb") as f:
             pickle.dump(self.durationsDictionary, f)
 
+        ###
+        ### try and load the data , classes, plates etc, related to the current job
+        ###
+
+        if not self.loadJobFunction(self.currentJob):
+            return
 
         self.spawn_home_window()
 
@@ -2531,6 +2575,7 @@ class mainWindow(tkinter.Tk):
                 sheet.cell(row=row, column=col).value = int(key)
             col+=1
         file = self.currentJob["folder"] + "/" + self.currentJob["jobno"] +  " " + self.currentJob["jobname"] + " - OV Template " + self.currentJob["surveydate"].strftime("%d-%m-%y") +  ".xlsm"
+        print("file is",file)
         wb.save(file)
         xl = win32com.client.Dispatch("Excel.Application")
         xl.Workbooks.Open(Filename=file, ReadOnly=1)

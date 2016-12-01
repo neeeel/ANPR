@@ -40,7 +40,7 @@ def get_all_combinations(data,first=False,last=False):
     ### it would return [[1,2],[1,2,3],[1,2,3,4],[2,3],[2,3,4],[3,4]]
     ###
     if first and last:
-        return data ### if first and last are true, we basically want to match the whole journey to the regstring
+        return [data] ### if first and last are true, we basically want to match the whole journey to the regstring
     combinations = []
     if not first:
         end = len(data)
@@ -64,7 +64,7 @@ def verify(journey,regex):
     ### Note: this function is recursive
     ###
 
-    #print("received",journey,regex,"length of journey is",len(journey))
+    print("received",journey,regex,"length of journey is",len(journey))
     if len(journey)==0 and len(regex)==0:
         return True
     if len(journey)==0 and len(regex)!=0:
@@ -74,51 +74,62 @@ def verify(journey,regex):
             return False
     zeroOrMoreFlag = False
     notFlag = False
+    matched = False
     for item in regex:
         if "*" in item:
             zeroOrMoreFlag = True
-            item = item[0]
+            item = item[:-1]
         if "¬" in item:
             notFlag = True
             item = item[1:]
+
         if item in ["I","B","O"]:
-            #print("checking",journey[0][2] , item)
+            print("checking",journey[0][2] , item)
             if journey[0][2] == item:
-                if notFlag:
-                    #print("failed due to not")
-                    return False
-                if len(journey) == 1 and len(regex)==1:
-                    return True
-                else:
-                    if zeroOrMoreFlag:
-                        return verify(journey[1:], regex)
-                    return verify(journey[1:],regex[1:])
-            else:
-                if notFlag:
-                    return verify(journey[1:], regex[1:])
-                if zeroOrMoreFlag:
-                    return verify(journey,regex[1:])
-                #print("failed , token didnt match direction")
-                return False
-        if item == "A":
-            pass
+                matched = True
+
         try: #### is it numeric?
             if int(item) !=0:
-                #print("checking", int(journey[0][1]), item)
                 if int(journey[0][1]) == int(item):
-                    if len(journey) == 1 and len(regex) == 1:
-                        return True
-                    else:
-                        return verify(journey[1:], regex[1:])
-                else:
-                    #print("failed")
-                    return False
+                    matched = True
         except ValueError as e:
-            #print("Value error raised on",item)
             pass ### regex value wasnt a number
+
+        if "|" in item: ### its a list of numbers(movements) OR'ed together
+            numlist = [int(num) for num in item.split("|")]
+            if int(journey[0][1]) in numlist:
+                matched = True
+
+
+        if matched:
+            if notFlag:
+                #print("failed due to not")
+                return False
+            if len(journey) == 1 and len(regex)==1:
+                return True
+            else:
+                if zeroOrMoreFlag:
+                    return verify(journey[1:], regex)
+                return verify(journey[1:],regex[1:])
+        else:
+            if notFlag:
+                if len(journey) == 1 and len(regex) == 1:
+                    return True
+                if zeroOrMoreFlag:
+                    return verify(journey[1:], regex)
+                return verify(journey[1:], regex[1:])
+            if zeroOrMoreFlag:
+                return verify(journey,regex[1:])
+            #print("failed , token didnt match direction")
+            return False
+
+
+
+
 
 def match(data,regstring):
     matches = []
+    print("-" * 100)
     print("in match, received",data,"regstring is",regstring,type(regstring))
     first=False
     last= False
