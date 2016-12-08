@@ -510,9 +510,70 @@ class mainWindow(tkinter.Tk):
             return
         try:
             i = lb.get(0,tkinter.END).index(text)
+            ###its already in the list, we dont want to add it again
         except Exception as e:
-            lb.insert(tkinter.END,text)
+            ### its not in the list, so we add it to the end
+            if self.validate_filter(text):
+                lb.insert(tkinter.END,text)
         event.widget.delete(0,tkinter.END)
+
+    def validate_filter(self,filter):
+        if "(" in filter:
+            if (")" in filter and filter.index("(") > filter.index(")")) or not ")" in filter:
+                messagebox.showinfo(message="Incorrect Brackets")
+                return False
+        if ")" in filter:
+            if ("(" in filter and filter.index("(") > filter.index(")")) or not "(" in filter:
+                messagebox.showinfo(message="Incorrect Brackets")
+                return False
+        tokens = filter.split("-")
+        if len(tokens) < 2:
+            messagebox.showinfo(message="You need to have 2 or more tokens in a filter")
+            return False
+        if "^"  in filter and not "^" in tokens[0]:
+            messagebox.showinfo(message="If you are using ^, it must always be the first character in the filter")
+            return False
+        if "!"  in filter and not "!" in tokens[-1]:
+            messagebox.showinfo(message="If you are using !, it must always be the last character in the filter")
+            return False
+        if "" in tokens:
+            messagebox.showinfo(message="Blank tokens not allowed")
+            return False
+        for i,t in enumerate(tokens[:-1]):
+            if "*" in t:
+                temp = t.replace("*","")
+                print("temp is",temp,"t is",t)
+                if temp == tokens[i+1]:
+                    temp = t
+                    tokens[i] = tokens[i+1]
+                    tokens[i+1] = temp
+        for t in tokens:
+            t = t.replace("*","")
+            t = t.replace("^", "")
+            t = t.replace("!", "")
+            t = t.replace("¬", "")
+            t = t.replace("(", "")
+            t = t.replace(")", "")
+            if t == "":
+                messagebox.showinfo(message="A token cannot only contain a special char(!,^,*,¬)")
+                return False
+            if t not in ["I","B","O"]:
+                try:  #### is it numeric?
+                    temp = int(t)
+                except ValueError as e:
+                    messagebox.showinfo(message="A token must contain I,B,O or a number")
+                    return False
+                return True
+            else:
+                return True
+
+
+
+
+
+
+
+
 
     def load_filter_from_csv(self,lb):
         lb.delete(0,tkinter.END)

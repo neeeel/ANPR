@@ -13,6 +13,7 @@ import csv
 import threading
 import shutil
 import anprregex
+import re
 
 
 flag = False
@@ -1556,10 +1557,15 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     inMov = sorted(inMov)
     outMov = sorted(outMov)
     bothMov = sorted(bothMov)
-    for f in filters:
-        pass
+    if bothMov == []:
+        bothMov = [10000]
 
 
+
+
+
+
+    print("starting first method ",datetime.datetime.now())
     result = []
     for journey in journeys:
         data = journey[2]
@@ -1574,6 +1580,8 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                 [output.append(item) for item in temp]
                 if not output in result:
                     result.append(output)
+
+    print("finishing first method",datetime.datetime.now())
 
     if durationCheck:
         if not job["durationsDictionary"] is None:
@@ -1608,6 +1616,42 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
         result = [item for item in result if item !=[]]
 
 
+    ###
+    ### convert the filters into a format useable with pythons regex module
+    ###
+
+    convertedFilters = []
+    for f in filters:
+        tokens = f.split("-")
+        for i, t in enumerate(tokens):
+            tokens[i] = tokens[i].replace("B", "(" + "|".join(map(str, bothMov)) + ")")
+            tokens[i] = tokens[i].replace("I", "(" + "|".join(map(str, inMov)) + ")")
+            tokens[i] = tokens[i].replace("O", "(" + "|".join(map(str, outMov)) + ")")
+
+        for i, t in enumerate(tokens):
+            if "*" in t:
+                print(t)
+                tokens[i] = tokens[i].replace("*", "")
+                tokens[i] = "(" + tokens[i] + "(?=,|\Z))*"
+                #tokens[i] = "(," + tokens[i] + ")*"
+                print(tokens[i])
+            else:
+                if i !=0:
+                    tokens[i] = "," + tokens[i]
+        if not "^" in f:
+            tokens[0] = "(^|,)" + tokens[0]
+        else:
+            tokens[0] = tokens[0].replace("^", "")
+            tokens[0] = "^" + tokens[0]
+        if not "!" in f:
+            tokens[-1] = tokens[-1] + r"(?=,|\Z)"
+        else:
+            tokens[-1] = tokens[-1].replace("!", "")
+            tokens[-1] = tokens[-1] + "$"
+        print("converted filter is", tokens)
+        convertedFilters.append("".join(tokens))
+
+
     try:
         with open(outputFolder + "/" + job["jobno"] + " " + job[
             "jobname"] + " Filtered Matching - all matches " + datetime.datetime.strftime(job["surveydate"],"%d-%m-%Y") + ".csv","w", newline="") as f:
@@ -1616,6 +1660,8 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     except PermissionError as e:
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
+
 
     resultsDict ={}
     for r in result:

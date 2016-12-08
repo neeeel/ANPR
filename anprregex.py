@@ -1,5 +1,7 @@
 
 
+import re
+
 # regular expression like matching for Journeys
 #
 
@@ -51,6 +53,68 @@ def get_all_combinations(data,first=False,last=False):
         [combinations.append(item) for item in result if item not in combinations]
     return combinations
 
+def getSublistIndex(list, sublist,start=0):
+    for i in range(len(list)-len(sublist)+1+start):
+        if sublist == list[i:i+len(sublist)]:
+            return i
+    return -1
+
+
+def match3(data,regstring):
+    result = []
+    #print("data",data,"regstring",regstring)
+    matchstring = [d[1] for d in data]
+    matchstring = ",".join(matchstring)
+    regex = re.compile(regstring)
+    match = regex.finditer(matchstring)
+    result = []
+    #print(matchstring)
+    for m in match:
+        start = m.start()
+        try:
+            s = m.group(1)
+        except Exception as e:
+            s = m.group()
+            print(e)
+        print("matched",s)
+        if s[0] == ",":
+            start+=1
+        if s != "," and s != "":
+            if s[-1] == ",":
+                s = s[:-1]
+            if s[0] == ",":
+                s = s[1:]
+            if s != "":
+                length = len(s.split(","))
+                commas = matchstring[0:start].count(",")
+                result.append(data[commas:commas+length])
+    return result
+
+def match2(data,regstring):
+    result = []
+    #print("data",data,"regstring",regstring)
+    matchstring = [d[1] for d in data]
+    matchstring = ",".join(matchstring)
+    match = re.finditer(regstring,matchstring)
+    result = []
+    #print(matchstring)
+    for m in match:
+        start = m.start()
+        s = m.group()
+        #print("matched",s)
+        if s[0] == ",":
+            start+=1
+        if s != "," and s != "":
+            if s[-1] == ",":
+                s = s[:-1]
+            if s[0] == ",":
+                s = s[1:]
+            if s != "":
+                length = len(s.split(","))
+                commas = matchstring[0:start].count(",")
+                result.append(data[commas:commas+length])
+    return result
+
 def verify(journey,regex):
     ###
     ### this function does the actual matching of the regstring against a journey
@@ -64,7 +128,7 @@ def verify(journey,regex):
     ### Note: this function is recursive
     ###
 
-    print("received",journey,regex,"length of journey is",len(journey))
+    #print("received",journey,regex,"length of journey is",len(journey))
     if len(journey)==0 and len(regex)==0:
         return True
     if len(journey)==0 and len(regex)!=0:
@@ -84,7 +148,7 @@ def verify(journey,regex):
             item = item[1:]
 
         if item in ["I","B","O"]:
-            print("checking",journey[0][2] , item)
+            #print("checking",journey[0][2] , item)
             if journey[0][2] == item:
                 matched = True
 
@@ -129,22 +193,22 @@ def verify(journey,regex):
 
 def match(data,regstring):
     matches = []
-    print("-" * 100)
-    print("in match, received",data,"regstring is",regstring,type(regstring))
+    #print("-" * 100)
+    #print("in match, received",data,"regstring is",regstring,type(regstring))
     first=False
     last= False
     if "^" in regstring:
-        print("detected first")
+        #print("detected first")
         first = True
         regstring = regstring.replace("^","")
-        print("regstring is now",regstring)
+        #print("regstring is now",regstring)
     if "!" in regstring:
-        print("detected last")
+        #print("detected last")
         last = True
         regstring = regstring.replace("!", "")
-        print("regstring is now", regstring)
+        #print("regstring is now", regstring)
     for combi in get_all_combinations(data,first=first,last=last):
-        print("checiking combi ",combi)
+        #print("checiking combi ",combi)
         tempMatches = []
         if "(" in regstring:
             main = regstring.replace("(", "")
@@ -152,9 +216,9 @@ def match(data,regstring):
             #print(main)
             regex = main.split("-")
             if verify(combi, regex):
-                print("-" * 100)
-                print(combi, "True")
-                print("-" * 100)
+                #print("-" * 100)
+                #print(combi, "True")
+                #print("-" * 100)
                 main = regstring.split("(")[1]
                 main = main.split(")")[0]
                 main = main.split("-")
@@ -162,26 +226,26 @@ def match(data,regstring):
                 for subcombis in get_all_combinations(combi):
                     if verify(subcombis, main):
                         if len(tempMatches) == 0:
-                            print("appending ",subcombis)
+                            #print("appending ",subcombis)
                             tempMatches.append(subcombis)
                         else:
                             if not subcombis in tempMatches:
                                 if len(subcombis) > len(tempMatches[-1]): ## in case any subset of the subtring matches
-                                    print("changing ", subcombis)
+                                    #print("changing ", subcombis)
                                     tempMatches[0]=subcombis
                 for match in tempMatches:
-                    print("-" * 100)
-                    print(match, "True")
-                    print("-" * 100)
+                    #print("-" * 100)
+                    #print(match, "True")
+                    #print("-" * 100)
                     matches.append(match)
 
 
         else:
             regex = regstring.split("-")
             if verify(combi, regex):
-                print("-" * 100)
-                print(combi, "True")
+                #print("-" * 100)
+                #print(combi, "True")
                 if not combi in matches:
                     matches.append(combi)
-                print("-" * 100)
+                #print("-" * 100)
     return matches
