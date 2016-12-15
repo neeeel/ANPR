@@ -1560,12 +1560,10 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     if bothMov == []:
         bothMov = [10000]
 
+    movementCounts = {} ### holds a dictionary counting the number of matched vehicles seen at each movement
 
 
 
-
-
-    print("starting first method ",datetime.datetime.now())
     result = []
     for journey in journeys:
         data = journey[2]
@@ -1581,7 +1579,6 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                 if not output in result:
                     result.append(output)
 
-    print("finishing first method",datetime.datetime.now())
 
     if durationCheck:
         if not job["durationsDictionary"] is None:
@@ -1615,6 +1612,27 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                     start+=2
         result = [item for item in result if item !=[]]
 
+
+    ###
+    ### build the momvent count dictionary
+    ###
+
+    for r in result:
+        for item in range(2,len(r),2): ### traverse along the journey, picking out every 2nd value , which is the movement number
+            movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
+            movementCounts[int(r[item])]+=1
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")+ job["timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index in range(0, len(times) - 1, 2):
+        temp = fullDf.between_time(times[index], times[index + 1], include_end=False)
+        dataframes.append(temp)
+    temp=pd.concat(dataframes)
+    for key,value in movementCounts.items():
+        movementCounts[key]= "{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))
+        movementCounts[key]= [len(temp[temp["newMovement"]==key]),value,"{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))]
+    job["movementCounts"] = movementCounts
 
     ###
     ### convert the filters into a format useable with pythons regex module
@@ -1678,7 +1696,8 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
 
     ###
     ### set up some indexes so that if any sites have 0 values, we still pick up the sites in the dataframe
-    ##
+    ###
+
     inDf = pd.DataFrame(index=inMov)
     outDf = pd.DataFrame(index=outMov)
 

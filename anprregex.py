@@ -5,6 +5,13 @@ import re
 # regular expression like matching for Journeys
 #
 
+def sublistExists(list, sublist):
+    if list==sublist:
+        return -1
+    for i in range(len(list)-len(sublist)+1):
+        if sublist == list[i:i+len(sublist)]:
+            return i
+    return -1
 
 def build_combinations(l,last):
     ###
@@ -54,10 +61,12 @@ def get_all_combinations(data,first=False,last=False):
     return combinations
 
 def getSublistIndex(list, sublist,start=0):
+    if list==sublist:
+        return False
     for i in range(len(list)-len(sublist)+1+start):
         if sublist == list[i:i+len(sublist)]:
-            return i
-    return -1
+            return True
+    return False
 
 
 def match3(data,regstring):
@@ -187,10 +196,6 @@ def verify(journey,regex):
             #print("failed , token didnt match direction")
             return False
 
-
-
-
-
 def match(data,regstring):
     matches = []
     #print("-" * 100)
@@ -248,4 +253,32 @@ def match(data,regstring):
                 if not combi in matches:
                     matches.append(combi)
                 #print("-" * 100)
-    return matches
+
+    #print(matches)
+    #return matches
+    finalMatches = []
+    for index, item in enumerate(matches):
+        #print(item)
+        for itemToCompare in matches[index:]:
+            #print("comparing", item, "with", itemToCompare)
+            result = sublistExists(itemToCompare, item)
+            if result != -1:
+                #print("replacing",item,itemToCompare)
+                matches[index + result] = itemToCompare
+                item = itemToCompare
+
+    matches = list(reversed(matches))
+    for index, item in enumerate(matches):
+        #print(item)
+        for itemToCompare in matches[index:]:
+            #print("comparing", item, "with", itemToCompare)
+            result = sublistExists(itemToCompare, item)
+            if result != -1:
+                #print("replacing in second ", item, itemToCompare)
+                matches[index + result] = itemToCompare
+                item = itemToCompare
+
+
+    result = []
+    [result.append(item) for item in matches if not item in result]
+    return result

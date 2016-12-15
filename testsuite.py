@@ -20,7 +20,7 @@ class regexTest(unittest2.TestCase):
         self.plate2 = ["Plate 2", "Car",[('18:15:44', '18', 'B'), ('13:25:15', '18', 'B'), ('14:03:51', '8', 'I')]]
         self.plate3 = ["Plate 2", "Car", [('18:15:44', '8', 'I'), ('13:25:15', '18', 'B'), ('14:03:51', '7', 'I'),('18:15:44', '18', 'B'), ('13:25:15', '18', 'B'), ('14:03:51', '11', 'O')]]
         self.plate4 = ["Plate 2", "Car", [('18:15:44', '18', 'B'), ('13:25:15', '18', 'B')]]
-        self.regexes = ["I-B-O","I-B*-O","I-B-B*-O","I-B*-O-I","^I-B*-O","I-¬I*","B*-B"]
+        self.regexes = ["I-B-O","I-B*-O","I-B-B*-O","I-B*-O-I","^I-B*-O","I-¬I*","B-B*"]
         self.inMov = [9,12,8,7]
         self.bothMov = [18,10]
         self.outMov = [17,11]
@@ -55,13 +55,13 @@ class regexTest(unittest2.TestCase):
 
         ### plate1
         #print(self.plate1[2],regexes[0])
-        self.assertTrue(len(anprregex.match2(self.plate1[2],regexes[0])) ==0)
-        self.assertTrue(len(anprregex.match2(self.plate1[2],regexes[1])) == 2)
-        self.assertTrue(len(anprregex.match2(self.plate1[2], regexes[2])) == 1)
-        self.assertTrue(len(anprregex.match2(self.plate1[2], regexes[3])) == 1)
-        self.assertTrue(len(anprregex.match2(self.plate1[2], regexes[4])) == 1)
+        self.assertTrue(len(anprregex.match(self.plate1[2],self.regexes[0])) ==0)
+        self.assertTrue(len(anprregex.match(self.plate1[2],self.regexes[1])) == 2)
+        self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[2])) == 1)
+        self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[3])) == 1)
+        self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[4])) == 1)
         #self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[5])) == 3)
-        self.assertTrue(len(anprregex.match2(self.plate1[2], regexes[6])) == 1)
+        self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[6])) == 1)
         #self.assertTrue(len(anprregex.match(self.plate1[2], self.regexes[7])) == 3)
 
 

@@ -567,14 +567,6 @@ class mainWindow(tkinter.Tk):
             else:
                 return True
 
-
-
-
-
-
-
-
-
     def load_filter_from_csv(self,lb):
         lb.delete(0,tkinter.END)
         file = filedialog.askopenfilename()
@@ -631,6 +623,35 @@ class mainWindow(tkinter.Tk):
         frame.grid_propagate(False)
         self.matrix = matrix.MatrixDisplay(frame, width, height)
 
+        frame = tkinter.Frame(bg="white", relief=tkinter.SUNKEN, borderwidth=2, height=700)
+        frame.grid(row=1, column=2, sticky="ne", padx=(50, 0))
+        inMov = []
+        numRows = 30
+        maxRows = 25
+        i = 2
+        while numRows / i > maxRows: i += 1
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                if mvmt["newmovement"] not in inMov:
+                    inMov.append(mvmt["newmovement"])
+        inMov = sorted(inMov)
+        f = tkinter.font.Font(family="helvetica", size=8)
+
+        tkinter.Label(frame, text="Matched %ages", font=f, bg="Light blue").grid(row=0, column=0,columnspan=10, sticky="ew")
+        tkinter.Label(frame, text="Mvmt", font=f, bg="Light blue").grid(row=1, column=0,  sticky="ew")
+        tkinter.Label(frame, text="Plates", font=f, bg="Light blue").grid(row=1, column=1,  sticky="ew")
+        tkinter.Label(frame, text="Matches", font=f, bg="Light blue").grid(row=1, column=2, sticky="ew")
+        tkinter.Label(frame, text="Matched %", font=f, bg="Light blue").grid(row=1, column=3,  sticky="ew")
+
+
+        for count, i in enumerate(inMov):
+            tkinter.Label(frame, text="Mvmt " + str(i), bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2))
+            tkinter.Label(frame,text="0", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2)+1)
+            tkinter.Label(frame, text="0", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 2)
+            tkinter.Label(frame, text="0%", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 3)
+
+
+
     def duration_check_selected(self,var):
         value = var.get()
         if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
@@ -675,6 +696,20 @@ class mainWindow(tkinter.Tk):
 
         if get_data:
             self.matrixData = self.filteredMatchingfunction(self.currentJob,filters,durationCheck,self.durationVar.get())
+        f = tkinter.font.Font(family="helvetica", size=8)
+        numRows = 30
+        count = 0
+        parent = self.nametowidget(frame.winfo_parent())
+        percentagesFrame = self.nametowidget(parent.winfo_children()[3])
+        for child in percentagesFrame.winfo_children()[5:]:
+            child.destroy()
+        for key,value in self.currentJob["movementCounts"].items():
+            tkinter.Label(percentagesFrame, text="Mvmt " + str(key), bg="white", font=f).grid(row=(count % numRows) + 2, column=(int(count / numRows) * 2),padx=5)
+            tkinter.Label(percentagesFrame, text=str(value[0]), bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 1,padx=5)
+            tkinter.Label(percentagesFrame, text=str(value[1]), bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 2,padx=5)
+            tkinter.Label(percentagesFrame, text=str(value[2]) + "%", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 3,padx=5)
+
+            count+=1
         inMov = []
         outMov = []
         for key, item in self.matrixData[0].items():
