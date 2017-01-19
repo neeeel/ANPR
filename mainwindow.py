@@ -18,22 +18,26 @@ import time
 import re
 import csv
 import matrix
+import copy
 
 
 class mainWindow(tkinter.Tk):
 
     def __init__(self):
         super(mainWindow, self).__init__()
-        ttk.Style().configure(".",bg="white")
+
         self.colourLabels = []
         self.entryValues = []
         self.revertButton = None
-
+        self.tracsisBlue = "#%02x%02x%02x" % (20, 27, 77)
+        self.tracsisGrey = "#%02x%02x%02x" % (99, 102, 106)
+        ttk.Style().configure(".", bg="white",fg="red")
         self.processOvertakingThread = None
         self.siteLabel = None
         self.box1Value = 0
         self.box2Value = 0 ### to keep track of the combo boxes on the comparison display sheet
         self.user = ""
+        self.oldJobData = None
         self.recalcuatePlatooningfunction = None
         self.filteredMatchingfunction = None
         self.platooningTime = 5
@@ -380,124 +384,297 @@ class mainWindow(tkinter.Tk):
     def display_option_changed(self,event):
         widget = event.widget
         print(widget.get(),widget.current())
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-            label = self.nametowidget(self.winfo_children()[2])
-        else:
-            label = self.nametowidget(self.winfo_children()[1])
-        if label.cget("text") == "Directional Cordon":
-            self.get_directional_cordon_data(widget.current(),get_data=False)
-        else:
-            self.get_nondirectional_cordon_data(widget.current(), get_data=False)
+        self.display_data(widget.current())
 
-    def routes_display_option_changed(self, event):
-        widget = event.widget
-        print(widget.get(), widget.current())
-        label = self.nametowidget(self.winfo_children()[1])
-        print("label text is", label.cget("text"))
-        if label.cget("text") == "First Seen/Last Seen":
-            self.get_non_directional_route_assignment_fs_ls_data(widget.current(), get_data=False)
-        else:
-            self.get_journey_pairs_data(widget.current(), get_data=False)
+    def matrix_label_clicked(self,selectedMovement):
+        ###
+        ### when a user clicks on a movement number on the matrix
+        ### the type of movement ( in, out, or both) is displayed in radio buttons
+        ### in the extrasFrame of the matching results screen
 
-    def filtered_display_option_changed(self, event):
-        widget = event.widget
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
+        if selectedMovement is None:
+            return
+        if self.radioVar is None:
+            return
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
             label = self.nametowidget(self.winfo_children()[2])
+            innerframe = self.nametowidget(self.winfo_children()[1])
+        else:
             frame = self.nametowidget(self.winfo_children()[1])
+            innerframe = self.nametowidget(frame.winfo_children()[0])
+
+        extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
+        for child in extrasFrame.winfo_children():
+            widget = self.nametowidget(child)
+            if type(widget) == tkinter.Radiobutton:
+                widget.configure(state="normal")
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                #print("direction of movement",mvmtNo,"is",mvmt["dir"])
+                if selectedMovement == mvmtNo:
+                    #print("woohoo")
+                    lbl = self.nametowidget(extrasFrame.winfo_children()[0])
+                    lbl.configure(text="Movement "+ str(selectedMovement))
+                    self.radioVar.trace_vdelete("w",self.radioVar.trace_id)
+                    self.radioVar.set(mvmt["dir"])
+                    self.radioVar.trace_id = self.radioVar.trace("w", self.direction_of_movement_changed)
+
+    def direction_of_movement_changed(self,*args):
+        ###
+        ### user can change the direction of a movement (in, out, both) on the Non directional
+        ### matching display. This function deals with that
+
+        print(self.radioVar.get())
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
+            label = self.nametowidget(self.winfo_children()[2])
+            innerframe = self.nametowidget(self.winfo_children()[1])
         else:
-            label = self.nametowidget(self.winfo_children()[1])
-            frame = self.nametowidget(self.winfo_children()[0])
-        listbox = self.nametowidget((frame.winfo_children()[2]))
-        print(widget.get(), widget.current())
-        label = self.nametowidget(self.winfo_children()[1])
+            frame = self.nametowidget(self.winfo_children()[1])
+            innerframe = self.nametowidget(frame.winfo_children()[0])
+        extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
+        lbl = self.nametowidget(extrasFrame.winfo_children()[0])
+        selectedMovement = lbl.cget("text").replace("Movement ","")
+        if selectedMovement == "":
+            return
+        print("movement number from label is",selectedMovement)
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                #print("direction of movement", mvmtNo, "is", mvmt["dir"])
+                if int(selectedMovement) == mvmtNo:
+                    print("site",site,"movement",mvmtNo,"old dir is",mvmt["dir"],"new dir is",self.radioVar.get())
+                    mvmt["dir"]= self.radioVar.get()
+                    print("site", site, "movement", mvmtNo, "dir is now", mvmt["dir"])
+        self.display_data(0)
 
-        self.calculate_filtered_matching(listbox,widget.current(), get_data=False)
+    def save_changes_to_movement_directions(self):
+        data = {}
+        data["job"] = self.currentJob
+        sites = []
+        for site, details in self.currentJob["sites"].items():
+            for mvmtNo, mvmt in details.items():
+                #print("site no",site,"mvmtno",mvmtNo,"original movments",mvmt["originalmovements"],"newmovement",mvmt["newmovement"])
+                for m in mvmt["originalmovements"]:
+                    sites.append([site,mvmtNo,m,mvmt["dir"],""])
+        data["sites"] = sites
+        myDB.save_Job(data,self.user)
+        self.updateDataFunction(self.currentJob)
+        self.oldJobData = copy.deepcopy(self.currentJob)
 
-    def spawn_cordon_screen(self):
+    ###
+    ### setting up, getting, and displaying the matching results
+    ###
+
+
+    def spawn_matching_results_screen(self,matchingType):
+        self.radioVar = None ### we only want a radioVar to exist for non directional matching.
+        self.oldJobData = None ### we only want this to exist for non directional matching
         for child in self.winfo_children():
             if type(self.nametowidget(child)) != tkinter.Toplevel:
                 child.destroy()
-        print("screen res is",self.winfo_screenwidth(),self.winfo_screenheight())
-        width = self.winfo_screenwidth() - 320
-        height = self.winfo_screenheight() - 100
-        self.matrixCanvasList = []
-        frame = tkinter.Frame(self, bg="white")
-        box = ttk.Combobox(frame,  width=10)
+        if self.winfo_screenheight() >800:
+            width = 1000
+            height = 800
+        else:
+            width = 700
+            height = 500
+        f = tkinter.font.Font(family="Helvetica", size=18, weight=tkinter.font.BOLD)
+        tkinter.Label(self, bg="white", text=matchingType + " Matching", font=f, fg=self.tracsisBlue).grid(row=0,column=0,columnspan=2,pady = 20)
+
+        outerFrame = tkinter.Frame(self,bg="white",width = 220,height = height, relief=tkinter.GROOVE, borderwidth=3)
+        outerFrame.grid(row=1,column=0,padx=10,sticky="ns")
+        outerFrame.grid_propagate(False)
+        controlPanel = tkinter.Frame(outerFrame,bg="white")
+        box = ttk.Combobox(controlPanel, width=10)
         box["values"] = ("Count", "Max", "Min", "Avg")
         box.bind("<<ComboboxSelected>>", self.display_option_changed)
-        box.grid(row=0,column=0)
+        box.grid(row=0,column=0,pady=10)
         box.current(0)
-        tkinter.Label(self, bg="white", text="Directional Cordon").grid(row=0, column=1)
-        f = tkinter.font.Font(family="courier", size=8)
-        checkboxframe = tkinter.Frame(frame, bg="white")
-        var = tkinter.IntVar()
-        ch =tkinter.Checkbutton(checkboxframe, text="In-Out",font=f, bg="white",variable=var)
-        ch.grid(row=0, column=0)
-        ch.select()
-        ch.var=var
-        var = tkinter.IntVar()
-        ch=tkinter.Checkbutton(checkboxframe, text="In-Both",font=f, bg="white",variable=var)
-        ch.grid(row=1, column=0)
-        ch.var=var
-        var = tkinter.IntVar()
-        ch=tkinter.Checkbutton(checkboxframe, text="Both-Out",font=f, bg="white",variable=var)
-        ch.grid(row=2, column=0)
-        ch.var = var
-        var = tkinter.IntVar()
-        ch=tkinter.Checkbutton(checkboxframe, text="Both-Both",font=f, bg="white",variable=var)
-        ch.grid(row=3, column=0)
-        ch.var = var
-        checkboxframe.grid(row=1,column=0)
+        tkinter.Button(controlPanel, text="Match", bg="white", height=2, width=12,command=lambda: self.get_matches(matchingType)).grid(row=1,column=0,pady=10)
+        extrasFrame = None
 
-        tkinter.Button(frame, text="Directional", bg="white", height=3,width=12,
-                       command=lambda :self.get_directional_cordon_data(0)).grid(row=2, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Non Directional", bg="white", height=3,width=12,
-                       command=lambda:self.get_nondirectional_cordon_data(0)).grid(row=3, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Back", bg="white", height=3, width=12,
-                       command=self.spawn_home_window).grid(row=4, column=0, padx=10, pady=10)
-        frame.grid(row=0,column=0, padx=20, pady=10,sticky="w",rowspan=5)
+        if matchingType == "Directional":
+            f = tkinter.font.Font(family="courier", size=8)
+            extrasFrame = tkinter.Frame(controlPanel,bg="white")
+            var = tkinter.IntVar()
+            ch = tkinter.Checkbutton(extrasFrame, text="In-Out", font=f, bg="white", variable=var)
+            ch.grid(row=0, column=0,sticky = "w")
+            ch.select()
+            ch.var = var
+            var = tkinter.IntVar()
+            ch = tkinter.Checkbutton(extrasFrame, text="In-Both", font=f, bg="white", variable=var)
+            ch.grid(row=1, column=0,sticky = "w")
+            ch.var = var
+            var = tkinter.IntVar()
+            ch = tkinter.Checkbutton(extrasFrame, text="Both-Out", font=f, bg="white", variable=var)
+            ch.grid(row=2, column=0,sticky = "w")
+            ch.var = var
+            var = tkinter.IntVar()
+            ch = tkinter.Checkbutton(extrasFrame, text="Both-Both", font=f, bg="white", variable=var)
+            ch.grid(row=3, column=0,sticky = "w")
+            ch.var = var
+            extrasFrame.grid(row=2, column=0, pady=10)
+            f = tkinter.font.Font(family='Arial', size=8)
+            l = tkinter.Label(controlPanel,text="Switch to Non Directional",font = f,bg="white")
+            l.grid(row=3,column=0,padx =10)
+            l.bind("<Enter>", self.on_label_entry)
+            l.bind("<Leave>", self.on_label_exit)
+            l.bind("<Button-1>", lambda event:self.spawn_matching_results_screen("Non Directional"))
 
-        frame = tkinter.Frame(self,relief=tkinter.GROOVE,borderwidth=3,bg="white",width = 800, height = 800)
-        frame.grid(row=1, column=1)
-        frame.grid_propagate(False)
-        self.matrix = matrix.MatrixDisplay(frame,width,height)
-        self.get_directional_cordon_data(0)
 
-    def spawn_route_assignment_screen(self):
-        for child in self.winfo_children():
-            if type(self.nametowidget(child)) != tkinter.Toplevel:
-                child.destroy()
-        width = self.winfo_screenwidth() - 120
-        height = self.winfo_screenheight() - 50
-        frame = tkinter.Frame(self, bg="white")
-        box = ttk.Combobox(frame, width=10)
-        box["values"] = ("Count", "Max", "Min", "Avg")
-        box.bind("<<ComboboxSelected>>", self.routes_display_option_changed)
-        box.grid(row=0, column=0)
-        box.current(0)
-        tkinter.Button(frame, text="First Seen/\nLast Seen", bg="white", height=3, width=12,
-                       command=lambda:self.get_non_directional_route_assignment_fs_ls_data(0)).grid(row=1, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Journey \nPairs", bg="white", height=3, width=12,
-                       command=lambda:self.get_journey_pairs_data(0)).grid(row=2, column=0, padx=10, pady=10)
-        tkinter.Button(frame, text="Back", bg="white", height=3, width=12,
-                       command=self.spawn_home_window).grid(row=3, column=0, padx=10, pady=10)
+        if matchingType == "Non Directional":
+            f = tkinter.font.Font(family="courier", size=8)
+            extrasFrame = tkinter.Frame(controlPanel, bg="white")
+            self.radioVar = tkinter.IntVar()
+            tkinter.Label(extrasFrame,text="Movement ",bg="white",font = f).grid(row=0)
+            self.radioVar.trace_id = self.radioVar.trace("w",self.direction_of_movement_changed)
+            tkinter.Radiobutton(extrasFrame, text="In", bg="white", font=f, value=1,variable=self.radioVar,state="disabled").grid(row=1, column=0)
+            tkinter.Radiobutton(extrasFrame, text="Out", bg="white", font=f, value=2,variable=self.radioVar,state="disabled").grid(row=2, column=0)
+            tkinter.Radiobutton(extrasFrame, text="Both", bg="white", font=f, value=3,variable=self.radioVar,state="disabled").grid(row=3, column=0)
+            tkinter.Button(extrasFrame,text="Save",font=f,command=self.save_changes_to_movement_directions).grid(row=4,column=0)
+            extrasFrame.grid(row=2, column=0, pady=10)
+            f = tkinter.font.Font(family='Arial', size=8)
+            l = tkinter.Label(controlPanel, text="Switch to Directional", font=f, bg="white")
+            l.grid(row=3, column=0, padx=10)
+            l.bind("<Enter>", self.on_label_entry)
+            l.bind("<Leave>", self.on_label_exit)
+            l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("Directional"))
 
-        e =tkinter.Entry(frame,width=10)
-        e.grid(row=4,column=0, padx=10, pady=10)
-        f = tkinter.font.Font(family="helvetica", size=8)
-        lb = tkinter.Listbox(frame, bg="white",font=f)
-        lb.grid(row=5, column=0)
-        e.bind("<Return>",lambda event:self.add_filter(event,lb))
+        if matchingType == "First Seen/Last Seen":
+            f = tkinter.font.Font(family="courier", size=8)
+            extrasFrame = tkinter.Frame(controlPanel, bg="white")
+            f = tkinter.font.Font(family='Arial', size=8)
+            l = tkinter.Label(controlPanel, text="Switch to Journey Pairs", font=f, bg="white")
+            l.grid(row=3, column=0, padx=10)
+            l.bind("<Enter>", self.on_label_entry)
+            l.bind("<Leave>", self.on_label_exit)
+            l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("All Journey Pairs"))
 
-        tkinter.Button(frame, text="Load", bg="white", height=1, width=5,command=lambda:self.load_filter_from_csv(lb)).grid(row=6, column=0, padx=10, pady=10)
-        frame.grid(row=0, column=0, padx=20, pady=10, sticky="w",rowspan=5)
+        if matchingType == "All Journey Pairs":
+            f = tkinter.font.Font(family="courier", size=8)
+            extrasFrame = tkinter.Frame(controlPanel, bg="white")
+            f = tkinter.font.Font(family='Arial', size=8)
+            l = tkinter.Label(controlPanel, text="Switch to First Seen/Last Seen", font=f, bg="white")
+            l.grid(row=3, column=0, padx=10)
+            l.bind("<Enter>", self.on_label_entry)
+            l.bind("<Leave>", self.on_label_exit)
+            l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("First Seen/Last Seen"))
 
-        tkinter.Label(self, bg="white", text="First Seen/Last Seen").grid(row=0, column=1)
-        frame = tkinter.Frame(self, bg="white",relief=tkinter.GROOVE,borderwidth=3,width = 800, height = 800)
-        frame.grid(row=1, column=1)
-        frame.grid_propagate(False)
-        self.matrix = matrix.MatrixDisplay(frame, width, height)
-        self.get_non_directional_route_assignment_fs_ls_data(0)
+        if matchingType == "Filtered":
+            f = tkinter.font.Font(family="helvetica", size=8)
+            extrasFrame = tkinter.Frame(controlPanel, bg="white")
+            extrasFrame.grid(row=2, column=0, pady=10)
+            tkinter.Label(extrasFrame,text="Enter Filter String",bg="white",font = f).grid(row=0,column=0, columnspan=3)
+            e = tkinter.Entry(extrasFrame, width=15)
+            e.grid(row=1, column=0, padx=10, pady=10, columnspan=3)
+            tkinter.Label(extrasFrame, text="Current Filters", bg="white", font=f).grid(row=2, column=0, columnspan=3)
+            lb = tkinter.Listbox(extrasFrame, bg="white", font=f)
+            lb.bind("<Double-Button-1>", self.remove_filter)
+            lb.grid(row=3, column=0, columnspan=3)
+            e.bind("<Return>", lambda event: self.add_filter(event, lb))
+            tkinter.Button(extrasFrame, text="Clear", bg="white", height=1, width=5,
+                           command=lambda: lb.delete(0, tkinter.END)).grid(row=4, column=0, pady=10)
+            tkinter.Button(extrasFrame, text="Run", bg="white", height=1, width=5,
+                           command=lambda: self.get_matches("Filtered")).grid(row=4, column=1, pady=10)
+            var = tkinter.IntVar()
+            check = tkinter.Checkbutton(extrasFrame, text="Duration Check", bg="white", font=f,
+                                        command=lambda: self.duration_check_selected(var), variable=var)
+            check.grid(row=5, column=0, columnspan=3)
+            check.var = var
+            self.durationVar = tkinter.IntVar()
+            tkinter.Radiobutton(extrasFrame, text="Split   ", bg="white", font=f, variable=self.durationVar, value=1,
+                                state="disabled").grid(row=6, column=0, columnspan=3)
+            tkinter.Radiobutton(extrasFrame, text="Discard", bg="white", font=f, variable=self.durationVar, value=2,
+                                state="disabled").grid(row=7, column=0, columnspan=3)
+            self.durationVar.set(1)
+
+
+        controlPanel.grid(row=1,column=0,sticky="ns")
+        self.update()
+        print("control panel width",controlPanel.winfo_width(),controlPanel.winfo_reqwidth())
+        controlPanel.grid_configure(padx = (198-controlPanel.winfo_width())/2)
+        if extrasFrame is not None:
+            extrasFrame.grid(row=2,column=0,pady=10)
+        matrixFrame = tkinter.Frame(self, relief=tkinter.GROOVE, borderwidth=3, bg="white", width=width, height=height)
+        matrixFrame.grid(row=1, column=1)
+        matrixFrame.grid_propagate(False)
+        self.matrix = matrix.MatrixDisplay(matrixFrame, width, height)
+        if matchingType == "Non Directional":
+            self.matrix.enable_click()
+            self.matrix.set_matrix_clicked_callback_function(self.matrix_label_clicked)
+        tkinter.Button(self, text="Back", bg="white",command=self.spawn_home_window,width=12).grid(row=4, column=0, padx=10, pady=10,sticky = "s")
+
+    def get_matches(self,matchType):
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
+            label = self.nametowidget(self.winfo_children()[2])
+            innerframe = self.nametowidget(self.winfo_children()[1])
+        else:
+            frame = self.nametowidget(self.winfo_children()[1])
+            innerframe = self.nametowidget(frame.winfo_children()[0])
+        if matchType == "Directional":
+            checkboxes = []
+            extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
+            for child in extrasFrame.winfo_children():
+                if type(child) == tkinter.Checkbutton:
+                    checkboxes.append(self.nametowidget(child).var.get())
+            self.matrixData = self.getCordonFunction(self.currentJob,checkboxes)
+        if matchType == "Non Directional":
+            self.oldJobData = copy.deepcopy(self.currentJob)
+            self.matrixData = self.getNonDirectionalCordonFunction(self.currentJob)
+        if matchType == "All Journey Pairs":
+            self.matrixData = self.getJourneyPairsFunction(self.currentJob)
+        if matchType == "First Seen/Last Seen":
+            self.matrixData = self.getRouteAssignmentFsLsFunction(self.currentJob,None)
+        if matchType == "Filtered":
+            extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
+            filters = []
+            durationCheck = 0
+            lb = self.nametowidget(extrasFrame.winfo_children()[3])
+            for row in lb.get(0, tkinter.END):
+                try:
+                    filters.append(row)
+                except Exception as e:
+                    pass
+            for child in extrasFrame.winfo_children():
+                widget = self.nametowidget(child)
+                if type(self.nametowidget(child)) == tkinter.Checkbutton:
+                    durationCheck = widget.var.get()
+            self.matrixData = self.filteredMatchingfunction(self.currentJob, filters, durationCheck,self.durationVar.get())
+
+        self.display_data(0)
+
+    def display_data(self,index):
+        if self.matrixData is None:
+            return
+        inMov = []
+        outMov=[]
+        #for site, details in self.currentJob["sites"].items():
+            #for mvmtNo, mvmt in details.items():
+                #if not int(mvmt["newmovement"]) in inMov:
+                    #inMov.append(int(mvmt["newmovement"]))
+                #if not int(mvmt["newmovement"]) in outMov:
+                    #outMov.append(int(mvmt["newmovement"]))
+        #inMov = sorted(inMov)
+        #outMov = sorted(outMov)
+        data = {}
+        for k, v in self.matrixData[0].items():
+            if k[0] not in inMov:
+                inMov.append(k[0])
+            if k[1] not in outMov:
+                outMov.append(k[1])
+            data[k] = v[index]
+        inMov = sorted(inMov)
+        outMov = sorted(outMov)
+        if index == 0:
+            for i, mov in enumerate(inMov):
+                data[(mov, "total")] = int(self.matrixData[1][i])
+            for i, mov in enumerate(outMov):
+                data[("total", mov)] = int(self.matrixData[2][i])
+            inMov.append("total")
+            outMov.append("total")
+            data[("total", "total")] = int(sum(self.matrixData[1]))
+            self.matrix.draw(inMov, outMov, data,self.currentJob)
+        else:
+            self.matrix.draw(inMov, outMov, data,self.currentJob, fontsize=6)
 
     def add_filter(self,event,lb):
         ###
@@ -626,7 +803,7 @@ class mainWindow(tkinter.Tk):
         frame = tkinter.Frame(bg="white", relief=tkinter.SUNKEN, borderwidth=2, height=700)
         frame.grid(row=1, column=2, sticky="ne", padx=(50, 0))
         inMov = []
-        numRows = 30
+        numRows = 40
         maxRows = 25
         i = 2
         while numRows / i > maxRows: i += 1
@@ -650,16 +827,16 @@ class mainWindow(tkinter.Tk):
             tkinter.Label(frame, text="0", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 2)
             tkinter.Label(frame, text="0%", bg="white", font=f).grid(row=(count % numRows) + 2,column=(int(count / numRows) * 2) + 3)
 
-
-
     def duration_check_selected(self,var):
         value = var.get()
         if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
 
             frame = self.nametowidget(self.winfo_children()[1])
         else:
-            frame = self.nametowidget(self.winfo_children()[0])
-        for child in frame.winfo_children():
+            frame = self.nametowidget(self.winfo_children()[1])
+            innerframe = self.nametowidget(frame.winfo_children()[0])
+        checkboxFrame = innerframe.winfo_children()[2]
+        for child in checkboxFrame.winfo_children():
             widget = self.nametowidget(child)
             if type(self.nametowidget(child)) == tkinter.Radiobutton:
                 if value == 1:
@@ -733,9 +910,9 @@ class mainWindow(tkinter.Tk):
             inMov.append("total")
             outMov.append("total")
             data[("total", "total")] = int(sum(self.matrixData[1]))
-            self.matrix.draw(inMov, outMov, data)
+            self.matrix.draw(inMov, outMov, data,self.currentJob)
         else:
-            self.matrix.draw(inMov, outMov, data, fontsize=6)
+            self.matrix.draw(inMov, outMov, data,self.currentJob, fontsize=6)
 
     def spawn_duration_matrix_screen(self):
 
@@ -860,180 +1037,6 @@ class mainWindow(tkinter.Tk):
             messagebox.showinfo(message=e.get() + " is not a valid time")
             e.delete(0,tkinter.END)
 
-    def get_non_directional_route_assignment_fs_ls_data(self,index,get_data=True):
-        inMov = []
-        outMov = []
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-            label = self.nametowidget(self.winfo_children()[2])
-            frame = self.nametowidget(self.winfo_children()[1])
-        else:
-            label = self.nametowidget(self.winfo_children()[1])
-            frame = self.nametowidget(self.winfo_children()[0])
-        label.config(text="First Seen/Last Seen")
-        listbox = self.nametowidget((frame.winfo_children()[5]))
-        filters = []
-        for row in listbox.get(0,tkinter.END):
-            try:
-                filters.append(list(map(int,row.split(","))))
-            except Exception as e:
-                pass
-        if filters == []:
-            filters  = None
-
-        if get_data:
-            self.matrixData = self.getRouteAssignmentFsLsFunction(self.currentJob,filters)
-        for site, details in self.currentJob["sites"].items():
-            for mvmtNo, mvmt in details.items():
-                if not int(mvmt["newmovement"]) in inMov:
-                    inMov.append(int(mvmt["newmovement"]))
-                if not int(mvmt["newmovement"]) in outMov:
-                    outMov.append(int(mvmt["newmovement"]))
-        inMov = sorted(inMov)
-        outMov = sorted(outMov)
-        box = self.nametowidget(frame.winfo_children()[0])
-        box.current(index)
-        data = {}
-        for k, v in self.matrixData[0].items():
-            data[k] = v[index]
-        if index == 0:
-            for i, mov in enumerate(inMov):
-                print(len(inMov),len(self.matrixData[1]))
-                print(i,mov,self.matrixData[1][i])
-                data[(mov, "total")] = int(self.matrixData[1][i])
-            for i, mov in enumerate(outMov):
-                data[("total", mov)] = int(self.matrixData[2][i])
-            inMov.append("total")
-            outMov.append("total")
-            data[("total", "total")] = int(sum(self.matrixData[1]))
-            self.matrix.draw(inMov, outMov, data)
-        else:
-            self.matrix.draw(inMov, outMov, data, fontsize=6)
-
-    def get_journey_pairs_data(self,index,get_data=True):
-        inMov = []
-        outMov = []
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-            label = self.nametowidget(self.winfo_children()[2])
-            frame = self.nametowidget(self.winfo_children()[1])
-        else:
-            label = self.nametowidget(self.winfo_children()[1])
-            frame = self.nametowidget(self.winfo_children()[0])
-        label.config(text="Journey Pairs")
-        if get_data:
-            self.matrixData = self.getJourneyPairsFunction(self.currentJob)
-        for site, details in self.currentJob["sites"].items():
-            for mvmtNo, mvmt in details.items():
-                if mvmt["newmovement"] not in inMov:
-                    inMov.append(mvmt["newmovement"])
-                if mvmt["newmovement"] not in outMov:
-                    outMov.append(mvmt["newmovement"])
-        inMov = sorted(inMov)
-        outMov = sorted(outMov)
-        frame = self.nametowidget(self.winfo_children()[0])
-        box = self.nametowidget(frame.winfo_children()[0])
-        box.current(index)
-        data = {}
-        for k, v in self.matrixData[0].items():
-            data[k] = v[index]
-        if index == 0:
-            for i, mov in enumerate(inMov):
-                data[(mov, "total")] = int(self.matrixData[1][i])
-            for i, mov in enumerate(outMov):
-                data[("total", mov)] = int(self.matrixData[2][i])
-            inMov.append("total")
-            outMov.append("total")
-            data[("total", "total")] = int(sum(self.matrixData[1]))
-            self.matrix.draw(inMov, outMov, data)
-        else:
-            self.matrix.draw(inMov, outMov, data, fontsize=6)
-
-    def get_nondirectional_cordon_data(self,index,get_data=True):
-        inMov=[]
-        outMov=[]
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-            label = self.nametowidget(self.winfo_children()[2])
-            frame = self.nametowidget(self.winfo_children()[1])
-        else:
-            label = self.nametowidget(self.winfo_children()[1])
-            frame = self.nametowidget(self.winfo_children()[0])
-        label.config(text="Non Directional Cordon")
-        for site, details in self.currentJob["sites"].items():
-            for mvmtNo, mvmt in details.items():
-                if not int(mvmt["newmovement"]) in inMov:
-                    inMov.append(int(mvmt["newmovement"]))
-                if not int(mvmt["newmovement"]) in outMov:
-                    outMov.append(int(mvmt["newmovement"]))
-        inMov = sorted(inMov)
-        outMov = sorted(outMov)
-        if get_data:
-            print("getting non directional data")
-            self.matrixData = self.getNonDirectionalCordonFunction(self.currentJob)
-        frame = self.nametowidget(self.winfo_children()[0])
-        box = self.nametowidget(frame.winfo_children()[0])
-        box.current(index)
-
-        data = {}
-        for k, v in self.matrixData[0].items():
-            data[k] = v[index]
-        if index == 0:
-            for i, mov in enumerate(inMov):
-                data[(mov, "total")] = int(self.matrixData[1][i])
-            for i, mov in enumerate(outMov):
-                data[("total", mov)] = int(self.matrixData[2][i])
-            inMov.append("total")
-            outMov.append("total")
-            data[("total", "total")] = int(sum(self.matrixData[1]))
-            self.matrix.draw(inMov, outMov, data)
-        else:
-            self.matrix.draw(inMov, outMov, data, fontsize=6)
-
-    def get_directional_cordon_data(self,index,get_data=True):
-        ###
-        ### get the data for a directional in out cordon
-        ### and then display it
-        ### this function can also be called when the combo box value gets changed
-        ### index refers to which set of data is displayed 0 = count, 1=max,2= min,3=avg
-        inMov = []
-        outMov = []
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-            label = self.nametowidget(self.winfo_children()[2])
-            frame = self.nametowidget(self.winfo_children()[1])
-        else:
-            label = self.nametowidget(self.winfo_children()[1])
-            frame = self.nametowidget(self.winfo_children()[0])
-        label.config(text="Directional Cordon")
-        if get_data:
-            checkboxes=[]
-            checkboxframe = self.nametowidget(frame.winfo_children()[1])
-            for child in checkboxframe.winfo_children():
-                if type(child) == tkinter.Checkbutton:
-                    checkboxes.append(self.nametowidget(child).var.get())
-            self.matrixData = self.getCordonFunction(self.currentJob,checkboxes)
-        for site, details in self.currentJob["sites"].items():
-            for mvmtNo, mvmt in details.items():
-                if mvmt["dir"] == 1 or mvmt["dir"] == 3:
-                    inMov.append(mvmt["newmovement"])
-                if mvmt["dir"] == 2 or mvmt["dir"] == 3:
-                    outMov.append(mvmt["newmovement"])
-        inMov = sorted(inMov)
-        outMov = sorted(outMov)
-        box = self.nametowidget(frame.winfo_children()[0])
-        box.current(index)
-        data={}
-        for k,v in self.matrixData[0].items():
-            data[k] = v[index]
-        if index ==0:
-            for i,mov in enumerate(inMov):
-                data[(mov,"total")] = int(self.matrixData[1][i])
-            for i, mov in enumerate(outMov):
-                data[( "total",mov)] = int(self.matrixData[2][i])
-            inMov.append("total")
-            outMov.append("total")
-            data[("total","total")] = int(sum(self.matrixData[1]))
-            self.matrix.draw(inMov,outMov,data)
-        else:
-            self.matrix.draw(inMov, outMov, data,fontsize=6)
-
     def scroll_matrix_screen(self,event):
         print(event)
         print(event.widget.cget("orient"), event.x, event.y)
@@ -1057,6 +1060,11 @@ class mainWindow(tkinter.Tk):
             self.matrixCanvasList[2].xview_moveto(f)
 
     def spawn_survey_setup_screen(self):
+        ###
+        ### The screen that displays a list of current projects
+        ### and allows you to add, edit or delete projects
+        ###
+
         try:
             self.joblist = myDB.get_jobs()
         except :
@@ -1078,35 +1086,52 @@ class mainWindow(tkinter.Tk):
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
         frame = tkinter.Frame(self,  bg="white")
-        f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
-        tkinter.Button(frame, text="Create new ANPR \nProject", bg="white", height=3,
-                       command=self.spawn_parameters_window).grid(row=0, column=0, padx=20, pady=20)
-        tkinter.Button(frame, text="Edit ANPR \nProject", width=17, height=3, bg="white",command=self.edit_job).grid(row=0, column=1, padx=20,
-                                                                                         pady=20)
-        #tkinter.Button(frame, text="Duplicate ANPR \nProject", width=17, height=3, bg="white").grid(row=0, column=2, padx=20,
-                                                                                         #pady=20)
-        tkinter.Button(frame, text="Delete ANPR \nProject", width=17, height=3, bg="white",command=self.delete_job).grid(row=0, column=2, padx=20,
-                                                                                         pady=20)
-        frame.grid(row=0, column=0,pady=(100,0),padx=(120,0))
+        print("screenheight is ",self.winfo_screenheight())
+        treefontsize = 8
+        fontsize = 12
+        headingWidth = 120
+        if self.winfo_screenheight() < 1000:
+            fontsize = 10
+            treefontsize = 7
+            headingWidth = 100
+        if self.winfo_screenheight() < 800:
+            fontsize = 8
+            treefontsize = 8
+            headingWidth = 85
+        f = tkinter.font.nametofont("TkDefaultFont").configure(size=fontsize)
+        tkinter.Button(frame, text="Create new ANPR \nProject", bg="white",fg=self.tracsisBlue, height=3,command=self.spawn_parameters_window).grid(row=0, column=0, padx=20, pady=20)
+        tkinter.Button(frame, text="Edit ANPR \nProject", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.edit_job).grid(row=0, column=1, padx=20,pady=20)
+        tkinter.Button(frame, text="Delete ANPR \nProject", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.delete_job).grid(row=0, column=2, padx=20,pady=20)
+
+        frame.grid(row=0, column=0,pady=(20,0),padx=(120,0))
         frame = tkinter.Frame(self, bg="white")
-        cols = ("Job No","Job Name","Survey Date","Survey Times","OV Template","OV Counts","Unclassed VRN","Classed VRN","Comparison","Completed","Created By","Created Date","Folder")
+
+        ### set up the treeview to display the ANPR projects
+
+        cols = ("Job No","Job Name","Survey Date","Survey Times","OV Template","OV Counts","Unclassed VRN","Classed VRN","Comparison","Completed","Created By","Created Date")
 
         self.tree = ttk.Treeview(frame,columns=tuple(range(len(cols))),show="headings",height = 30)
+        style = ttk.Style()
+        style.configure(".", font=('Helvetica', 6), foreground="white")
+        style.configure("Treeview.Heading", foreground=self.tracsisBlue,background="black")
         self.tree.bind("<Double-Button-1>", self.load_job)
         self.tree.heading(0,text="WERW")
+        self.tree.tag_configure("odd", background="white",foreground=self.tracsisBlue)
+        self.tree.tag_configure("even", background="azure2", foreground=self.tracsisBlue)
         self.tree.tag_configure("grn",foreground="dark blue")
         for i,col in enumerate(cols):
             self.tree.heading(i,text=col)
-            self.tree.column(i,width  = 120,anchor=tkinter.CENTER)
+            self.tree.column(i,width  = headingWidth,anchor=tkinter.CENTER)
         for i in range(2):
-            self.tree.column(i,width=150)
-        #tree.column(3)
+            self.tree.column(i,width=headingWidth+30)
             self.tree.grid(row=0,column=0)
-            self.tree.tag_configure("tree",font="courier 8")
-        for job in self.joblist:
-            self.tree.insert("","end",values =job,tags=("tree","grn"))
-
-
+            self.tree.tag_configure("tree",font="courier " + str(treefontsize))
+        for i,job in enumerate(self.joblist):
+            if i%2 == 0:
+                self.tree.insert("","end",values =job,tags=("tree","even"))
+            else:
+                self.tree.insert("", "end", values=job, tags=("tree", "odd"))
+        self.tree.configure(height =len(self.joblist))
         frame.grid(row=1, column=0,padx=(120,0))
 
     def spawn_parameters_window(self):
@@ -1114,7 +1139,7 @@ class mainWindow(tkinter.Tk):
         for child in self.winfo_children():
             child.destroy()
         win = tkinter.Frame(self,width= 1500,height = 900,bg = "white")
-        win.grid_propagate(False)
+        #win.grid_propagate(False)
         win.grid(row=0,column=0)
         outerFrame = tkinter.Frame(win,bg = "white")
 
@@ -1122,11 +1147,13 @@ class mainWindow(tkinter.Tk):
         ### set up the top left frame
         ###
 
+        f = tkinter.font.Font(family="helvetica", size=9)
+
         frame = tkinter.Frame(outerFrame,width=330,height = 150,bg = "white",relief=tkinter.GROOVE,borderwidth=2)
-        frame.grid_propagate(False)
-        tkinter.Label(frame, text="Job No", bg="white").grid(row=0, column=0, pady=10, padx=(40, 0))
-        tkinter.Label(frame,text = "Job Name",bg = "white").grid(row=1,column = 0,pady = 10,padx=(40,0))
-        tkinter.Label(frame, text="Date",bg = "white").grid(row=2, column=0, pady=10, sticky="w",padx=(40,0))
+        #frame.grid_propagate(False)
+        tkinter.Label(frame, text="Job No", bg="white",font = f).grid(row=0, column=0,sticky="e")
+        tkinter.Label(frame,text = "Job Name",bg = "white",font = f).grid(row=1,column = 0,sticky="e")
+        tkinter.Label(frame, text="Date",bg = "white",font = f).grid(row=2, column=0,sticky="e")
         self.entryValues.append(tkinter.StringVar())
         tkinter.Entry(frame, width=20, textvariable=self.entryValues[-1],bg = "white").grid(row=0, column=1, pady=10, padx=10)
         self.entryValues.append(tkinter.StringVar())
@@ -1141,7 +1168,10 @@ class mainWindow(tkinter.Tk):
 
 
 
-        frame.grid(row=0, column=0, sticky="nw", padx=(100, 10),pady= (70,0))
+        frame.grid(row=0, column=0)
+
+        self.update()
+        width = frame.winfo_reqwidth()
 
 
 
@@ -1150,62 +1180,62 @@ class mainWindow(tkinter.Tk):
         ### set up mid left frame
         ###
         vcmd = (self.register(self.validate_time_cell_input),"%d", "%s","%S")
-        frame = tkinter.Frame(outerFrame,width=330,height=350,bg = "white",relief=tkinter.GROOVE,borderwidth=2)
+        frame = tkinter.Frame(outerFrame,width=width,height=260,bg = "white",relief=tkinter.GROOVE,borderwidth=2)
         frame.grid_propagate(False)
-        tkinter.Label(frame, text="From", bg="white").grid(row=0, column=1, pady=10, padx=5)
-        tkinter.Label(frame, text="To", bg="white").grid(row=0, column=2, pady=10, padx=5)
-        tkinter.Label(frame, text="Time Period 1",bg = "white").grid(row=1, column=0,pady = 10,padx = 5,sticky="e")
-        tkinter.Label(frame, text="Time Period 2",bg = "white").grid(row=2, column=0,pady = 10,padx = 5,sticky="e")
-        tkinter.Label(frame, text="Time Period 3",bg = "white").grid(row=3, column=0,pady = 10,padx = 5,sticky="e")
-        tkinter.Label(frame, text="Time Period 4",bg = "white").grid(row=4, column=0,pady = 10,padx = 5,sticky="e")
+        tkinter.Label(frame, text="From", bg="white",font = f).grid(row=0, column=1, pady=10, padx=5)
+        tkinter.Label(frame, text="To", bg="white",font = f).grid(row=0, column=2, pady=10, padx=5)
+        tkinter.Label(frame, text="Time 1",bg = "white",font = f).grid(row=1, column=0,pady = 10,padx = 5,sticky="e")
+        tkinter.Label(frame, text="Time 2",bg = "white",font = f).grid(row=2, column=0,pady = 10,padx = 5,sticky="e")
+        tkinter.Label(frame, text="Time 3",bg = "white",font = f).grid(row=3, column=0,pady = 10,padx = 5,sticky="e")
+        tkinter.Label(frame, text="Time 4",bg = "white",font = f).grid(row=4, column=0,pady = 10,padx = 5,sticky="e")
         for i in range(1, 5):
             self.entryValues.append(tkinter.StringVar())
-            e = tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd)
+            e = tkinter.Entry(frame, width=7, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd)
             e.grid(row=i, column=1, pady=10,padx=5)
             e.bind("<FocusOut>",self.validate_hhmm)
             self.entryValues.append(tkinter.StringVar())
-            e = tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd)
+            e = tkinter.Entry(frame, width=7, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd)
             e.grid(row=i, column=2, pady=10,padx=5)
             e.bind("<FocusOut>", self.validate_hhmm)
-        tkinter.Label(frame, text="Interval", bg="white").grid(row=5, column=0, pady=10, padx=10, sticky="e")
+        tkinter.Label(frame, text="Interval", bg="white",font = f).grid(row=5, column=0, pady=10, padx=10, sticky="e")
         self.entryValues.append(tkinter.StringVar())
         box = ttk.Combobox(frame, textvariable=self.entryValues[-1], width=15)
         box["values"] = ("5", "15", "30", "60")
         box.grid(row=5, column=1,columnspan = 3)
-        frame.grid(row=1, column=0, padx=(100, 10), pady=20)
+        frame.grid(row=1, column=0,pady=10)
 
         ###
         ### set up lower left frame
         ###
 
 
-        frame = tkinter.Frame(outerFrame, width=330,height =60, bg="white", relief=tkinter.GROOVE, borderwidth=2)
+        frame = tkinter.Frame(outerFrame, width=width,height =50, bg="white", relief=tkinter.GROOVE, borderwidth=2)
         frame.grid_propagate(False)
         vcmd = (self.register(self.validate_is_numeric_only), "%d", "%s", "%S")
-        tkinter.Label(frame, text="No of Cameras", bg="white").grid(row=0, column=0, pady=10, padx=10, sticky="e")
+        tkinter.Label(frame, text="# Cameras", bg="white",font = f).grid(row=0, column=0, pady=10, padx=10, sticky="e")
         self.entryValues.append(tkinter.StringVar())
-        tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd).grid(row=0, column=1, pady=10,
+        tkinter.Entry(frame, width=7, textvariable=self.entryValues[-1], bg="white",validate="key",validatecommand=vcmd).grid(row=0, column=1, pady=10,
                                                                                            padx=0, sticky="w")
-        tkinter.Button(frame,text = "Update",height =1,command = self.update_movement_window).grid(row=0,column=2,padx=10)
-        frame.grid(row=2,column=0,sticky="nw", padx=(100, 10))
-        outerFrame.grid(row=0, column=0)
+        tkinter.Button(frame,text = "Update",height =1,command = self.update_movement_window,font = f).grid(row=0,column=2)
+        frame.grid(row=2,column=0)
+        outerFrame.grid(row=0, column=0,padx = 10,rowspan=2)
 
         ###
         ### set up classification frame
         ###
-        outerFrame = tkinter.Frame(win, bg="white")
-        frame = tkinter.Frame(outerFrame,bg = "white", width = 300,height = 520, relief=tkinter.GROOVE, borderwidth=2)
-        frame.grid_propagate(False)
-        tkinter.Label(frame, text="Classification",bg = "white").grid(row=0, column=0,columnspan = 3)
-        tkinter.Label(frame, text="Overview",bg = "white").grid(row=1, column=0, pady=10, padx=10)
-        tkinter.Label(frame, text="ANPR classes",bg = "white").grid(row=1, column=1, pady=10, padx=10)
+        classificationFrame = tkinter.Frame(outerFrame, bg="white", width = 300,height = 480)
+        frame = tkinter.Frame(classificationFrame,bg = "white", relief=tkinter.GROOVE, borderwidth=2)
+        #frame.grid_propagate(False)
+        tkinter.Label(frame, text="Classification",bg = "white",font = f).grid(row=0, column=0,columnspan = 3)
+        tkinter.Label(frame, text="Overview",bg = "white",font = f).grid(row=1, column=0, pady=10, padx=10)
+        tkinter.Label(frame, text="ANPR classes",bg = "white",font = f).grid(row=1, column=1, pady=10, padx=10)
 
         for i in range(10):
             self.entryValues.append(tkinter.StringVar())
             tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1],bg = "white").grid(row=2 + i, column=0, pady=10, padx=10)
             self.entryValues.append(tkinter.StringVar())
             tkinter.Entry(frame, width=10, textvariable=self.entryValues[-1],bg = "white").grid(row=2+i, column=1, pady=10, padx=10)
-        frame.grid(row=0,column =1,sticky="nw")
+        frame.grid(row=0,column =1)
 
 
         ###
@@ -1215,37 +1245,41 @@ class mainWindow(tkinter.Tk):
         frame = tkinter.Frame(outerFrame, bg="white", width=300, height=70)
         tkinter.Button(frame, text="Back", bg="white",command=self.spawn_survey_setup_screen).grid(row=0, column=0, padx=10,sticky="w")
         tkinter.Button(frame,text="Save",bg = "white",command=self.save_job).grid(row=0,column=1,padx = 10,sticky = "e")
-        frame.grid(row=1,column=1,pady=30)
-        outerFrame.grid(row=0, column=1,pady=(95,0))
+        frame.grid(row=3,column=1,padx = 10,pady=10)
+        classificationFrame.grid(row=0, column=1,rowspan  =3)
 
-
+        print("width of outer frame ( on left) is",outerFrame.winfo_reqwidth())
         ###
         ### movements frame
         ###
-
-        outerFrame = tkinter.Frame(win, bg="white", width=1000, height=880)
-        outerFrame.grid_propagate(False)
-        frame = tkinter.Frame(outerFrame, bg="white", width=1100, height=200)
-        tkinter.Label(frame, text="On Site Movements", bg="white").grid(row=0, column=0,columnspan=3)
-        tkinter.Label(frame, text="ANPR Movements", bg="white").grid(row=0, column=3,columnspan=3,padx = (200,0))
-        tkinter.Label(frame, text="Site", bg="white").grid(row=1, column=0,padx = (10,0))
-        tkinter.Label(frame, text="Cam", bg="white").grid(row=1, column=1,padx = (60,0))
-        tkinter.Label(frame, text="Mvmt", bg="white").grid(row=1, column=2,padx = (60,0))
-        tkinter.Label(frame, text="Movement", bg="white").grid(row=1, column=3,padx = (150,90))
-        tkinter.Label(frame, text="Dir", bg="white").grid(row=1, column=4,padx = 0)
-        tkinter.Label(frame, text="", bg="white").grid(row=1, column=5, padx=0)
-        frame.grid(row=0, column=0)
-        self.movementsFrame = tkinter.Frame(outerFrame,bg="white", width=800, height=888, relief=tkinter.GROOVE, borderwidth=3)
-        self.movementsFrame.grid_propagate(False)
+        width = self.winfo_screenwidth()- outerFrame.winfo_width()
+        height = self.winfo_screenheight()
+        movementsFrame = tkinter.Frame(win, bg="white", width=width, height=height-100 )
+        #movementsFrame.grid_propagate(False)
+        labelFrame = tkinter.Frame(movementsFrame, bg="white")
+        tkinter.Label(labelFrame, text="On Site Movements", bg="white").grid(row=0, column=0,columnspan=3)
+        tkinter.Label(labelFrame, text="ANPR Movements", bg="white").grid(row=0, column=3,columnspan=3,padx = (200,0))
+        tkinter.Label(labelFrame, text="Site", bg="white").grid(row=1, column=0,padx = (10,0))
+        tkinter.Label(labelFrame, text="Cam", bg="white").grid(row=1, column=1,padx = (60,0))
+        tkinter.Label(labelFrame, text="Mvmt", bg="white").grid(row=1, column=2,padx = (60,0))
+        tkinter.Label(labelFrame, text="Movement", bg="white").grid(row=1, column=3,padx = (150,90))
+        tkinter.Label(labelFrame, text="Dir", bg="white").grid(row=1, column=4,padx = 0)
+        tkinter.Label(labelFrame, text="", bg="white").grid(row=1, column=5, padx=0)
+        labelFrame.grid(row=0, column=0)
+        self.update()
+        print("label frame, height is",labelFrame.winfo_height())
+        self.movementsFrame = tkinter.Frame(movementsFrame,bg="white", width=width, height=height - 100, relief=tkinter.GROOVE, borderwidth=3)
+        #self.movementsFrame.grid_propagate(False)
         self.movementsFrame.grid(row=1,column  = 0,columnspan = 6,padx =0,pady=0)
-        outerFrame.grid(row=0, column=2, pady=(10, 0),padx=10)
+        movementsFrame.grid(row=0, column=1, pady=(10, 0),padx=10)
+        self.update()
 
     def edit_job(self):
         if self.tree.selection() == "":
             return
         jobname = self.tree.item(self.tree.selection()[0])
         print("selected job", jobname["values"])
-        self.currentJob = myDB.load_job(jobname["values"][0], jobname["values"][1], jobname["values"][2])
+        self.currentJob = myDB.load_job(jobname["values"][0], jobname["values"][1], datetime.datetime.strptime(jobname["values"][2],"%d/%m/%y").date())
         self.spawn_parameters_window()
         job = self.currentJob
         self.entryValues[0].set(job["jobno"])
@@ -1264,7 +1298,7 @@ class mainWindow(tkinter.Tk):
         t = job["timeperiod4"]
         self.entryValues[9].set(t.split("-")[0])
         self.entryValues[10].set(t.split("-")[1])
-        self.entryValues[12].set(job["noofcameras"])
+        self.entryValues[12].set(job["noOfCameras"])
         self.entryValues[11].set(job["interval"])
         classes = job["classification"].split(",")
         for index,e in enumerate(self.entryValues[13:33]):
@@ -1488,7 +1522,7 @@ class mainWindow(tkinter.Tk):
 
         job["jobno"] = self.entryValues[0].get()
         job["jobname"]=self.entryValues[1].get()
-        job["surveyDate"]= self.entryValues[2].get()
+        job["surveydate"]= datetime.datetime.strptime(self.entryValues[2].get() ,"%d/%m/%y").date()
 
         for i in range(3,11,2):
             try:
@@ -1551,10 +1585,12 @@ class mainWindow(tkinter.Tk):
 
 
         result = myDB.save_Job(data,self.user)
+        print("in win, job folder is",result["folder"])
         if result == False:
             print("failed to save to db")
             return
-        job = myDB.load_job(job["jobno"],job["jobname"],job["surveyDate"])
+        job = myDB.load_job(job["jobno"],job["jobname"],job["surveydate"])
+        print("in win 2nd time, job folder is", result["folder"])
         job["timeAdjustmentsDictionary"] = {}
         self.updateDataFunction(job)
         self.spawn_survey_setup_screen()
@@ -1598,7 +1634,10 @@ class mainWindow(tkinter.Tk):
             tkinter.Radiobutton(scrollframe.interior,text = "In",variable=self.entryValues[-1],value=1,bg="white").grid(row=i,column = 4,padx=(50,0))
             tkinter.Radiobutton(scrollframe.interior, text="Out", variable=self.entryValues[-1],value=2,bg="white").grid(row=i, column=5)
             tkinter.Radiobutton(scrollframe.interior, text="both", variable=self.entryValues[-1],value=3,bg="white").grid(row=i, column=6,padx =(0,30))
+
         scrollframe.grid(row=1,column = 0,padx = 0,pady=0)
+        self.update()
+        print("size of scrollframe is", scrollframe.winfo_height())
 
     def spawn_summary_window(self):
         ###
@@ -1641,57 +1680,78 @@ class mainWindow(tkinter.Tk):
         ### tasks related to the ANPR project
         ###
 
+        if self.oldJobData is not None:
+            self.currentJob = copy.deepcopy(self.oldJobData)
+            self.oldJobData = None
+
         for child in self.winfo_children():
             child.destroy()
         self.colourLabels = []
         self.summaryTree = None
         self.img = ImageTk.PhotoImage(Image.open("folder-icon.jpg").resize((30,30),Image.ANTIALIAS))
+        f = tkinter.font.nametofont("TkDefaultFont").configure(size=12)
+        offset = self.winfo_screenwidth() - 820  ### the amount to offset the mainframe in the window so its centred
+        offset /= 2
+        if self.winfo_screenheight() >800:
+            width = 1000
+            height = 800
+            fontsize = 14
+            f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
+        else:
+            width = 800
+            height = 600
+            fontsize=9
+            f = tkinter.font.nametofont("TkDefaultFont").configure(size=9)
+        mainframe = tkinter.Frame(self, width=820,bg="white")
+        mainframe.grid(row=0, column=0, pady=(100, 0), padx=(offset, 0))
 
-        frame = tkinter.Frame(self, bg="white")
-        f = tkinter.font.nametofont("TkDefaultFont").configure(size=14)
+        frame = tkinter.Frame(mainframe, bg="light grey", width=820,relief=tkinter.GROOVE,borderwidth=1)
+        f = tkinter.font.Font(family='Helvetica', size=fontsize, weight=tkinter.font.BOLD)
         d = datetime.datetime.strftime(self.currentJob["surveydate"],"%d/%m/%y")
-        tkinter.Label(frame, text=self.currentJob["jobno"] + " " + self.currentJob["jobname"]+ " " + d , bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=0, column=2,columnspan = 10,ipadx =30,pady = (10,30))
-        tkinter.Button(frame,image=self.img,command=self.open_project_folder).grid(row=0,column=14,padx=10,pady = (10,30))
-        tkinter.Label(frame,text = "Overviews", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=1,column = 0,ipadx =30)
-        tkinter.Button(frame, text="Create Overview \nCount Template", width=17, bg="white", height=3,
-                       command=self.export_OVTemplate).grid(row=2, column=0, padx=20, pady=20)
-        tkinter.Button(frame, text="Load Overview \nCount Results", width=17, height=3, bg="white",command=self.load_OV_counts).grid(row=2, column=1, padx=20,
-                                                                                             pady=20)
-        tkinter.Label(frame, text="VRNs", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=3, column=0,ipadx =30)
-        tkinter.Button(frame, text="Load Unclassed\n VRNs", width=17, height=3, bg="white",command = self.load_unclassed_plates).grid(row=4, column=0,
-                                                                                                    padx=20,pady=20)
-        tkinter.Button(frame, text="Load Classed\n VRNs", width=17, height=3, bg="white",command=self.load_classes).grid(row=4, column=1,
-                                                                                                 padx=20, pady=20)
-        tkinter.Button(frame, text="Duplicate Removal/ \nTime Adjustments", width=17, height=3, bg="white",command=self.spawn_duplicates_window).grid(row=4, column=2,padx=20,
-                                                                                                        pady=20)
-        tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",command=self.spawn_duration_matrix_screen).grid(row=4, column=3, padx=20, pady=20, sticky="e")
+        tkinter.Label(frame, text=self.currentJob["jobno"] + " " + self.currentJob["jobname"]+ " " + d , bg="light grey",fg=self.tracsisBlue,font=f).grid(row=0, column=0,padx=(220,10),ipady=10)
+        tkinter.Button(frame, image=self.img, command=self.open_project_folder).grid(row=0, column=1)
+        frame.grid(row=0, column=0,sticky="ew")
+        f = tkinter.font.Font(family='Arial', size=fontsize)
+        frame = tkinter.Frame(mainframe, bg="white",relief=tkinter.GROOVE,borderwidth=1,width=820)
+        tkinter.Label(frame,text = "Overviews", bg="white",fg=self.tracsisBlue).grid(row=1,column = 0,padx = (200,0),columnspan = 2,sticky="ew")
+        tkinter.Button(frame, text="Create Overview \nCount Template", width=17, bg="white",fg=self.tracsisBlue, height=3,
+                       command=self.export_OVTemplate).grid(row=2, column=0, padx=(220,20), pady=10)
+        tkinter.Button(frame, text="Load Overview \nCount Results", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.load_OV_counts).grid(row=2, column=1, padx=20,pady=10)
+        frame.grid(row=1,column=0,pady=5,sticky="ew")
 
+        frame = tkinter.Frame(mainframe, bg="white",relief=tkinter.GROOVE,borderwidth=1,width=820)
+        tkinter.Label(frame, text="VRNs", bg="white",fg=self.tracsisBlue).grid(row=3, column=0,ipadx =30,columnspan = 10)
+        tkinter.Button(frame, text="Load Unclassed\n VRNs", width=17, height=3, bg="white",fg=self.tracsisBlue,command = self.load_unclassed_plates).grid(row=4, column=0,padx=20,pady=10)
+        tkinter.Button(frame, text="Load Classed\n VRNs", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.load_classes).grid(row=4, column=1,
+                                                                                                 padx=20, pady=10)
+        tkinter.Button(frame, text="Duplicate Removal/ \nTime Adjustments", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.spawn_duplicates_window).grid(row=4, column=2,padx=20,
+                                                                                                        pady=10)
+        tkinter.Button(frame, text="Duration \n Limiter", width=17, height=3, bg="white",fg=self.tracsisBlue,command=self.spawn_duration_matrix_screen).grid(row=4, column=3, padx=20, pady=10, sticky="e")
+        frame.grid(row=2, column=0,pady=5,sticky="ew")
+        self.update()
+        print("wibble",frame.winfo_width(),self.winfo_reqwidth())
 
-        #tkinter.Button(frame, text="Time \n Adjustments", width=17, height=3, bg="white",command=self.spawn_time_adjustments_screen).grid(row=4, column=3, padx=20,
-                                                                                                                        #pady=20,sticky="e")
+        frame = tkinter.Frame(mainframe, bg="white",relief=tkinter.GROOVE,borderwidth=1,width=820)
+        tkinter.Label(frame, text="Comparison", bg="white").grid(row=5, column=0,padx = (200,0),columnspan = 10)
+        tkinter.Button(frame, text="View Comparison", width=17, height=3, bg="white",fg=self.tracsisBlue,command= self.get_comparison_data).grid(row=6, column=0, padx=(220,20), pady=10)
+        tkinter.Button(frame, text="Create Client\nComparison", width=17, height=3, bg="white",fg=self.tracsisBlue).grid(row=6, column=1,padx=20, pady=10)
+        frame.grid(row=3, column=0,pady=5,sticky="ew")
 
-
-        tkinter.Label(frame, text="Comparison", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=5, column=0,ipadx =30)
-        tkinter.Button(frame, text="View Comparison", width=17, height=3, bg="white",command= self.get_comparison_data).grid(row=6, column=0,
-                                                                                                 padx=20, pady=20)
-        tkinter.Button(frame, text="Create Client\nComparison", width=17, height=3, bg="white").grid(row=6, column=1,
-                                                                                               padx=20, pady=20)
-
-        tkinter.Label(frame, text="Matching", bg="white",relief = tkinter.GROOVE,borderwidth = 2).grid(row=7, column=0,ipadx =30)
-        tkinter.Button(frame, text="Open/Closed\nCordon", width=17, height=3, bg="white",command=self.spawn_cordon_screen).grid(row=8, column=0,
-                                                                                           padx=20, pady=20)
-        tkinter.Button(frame, text="Route\nAssignment", width=17, height=3, bg="white",command=self.spawn_route_assignment_screen).grid(row=8, column=1,
-                                                                                                     padx=20, pady=20)
-        tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,
-                                                                                             pady=20)
-        tkinter.Button(frame, text="Filtered\nMatching", width=17, height=3, bg="white",command=self.spawn_filter_matching_screen).grid(row=8, column=3, padx=20,pady=20)
-
-
-
-
-        tkinter.Button(frame, text="Back", width=10, height=1, bg="white",command = self.spawn_survey_setup_screen).grid(row=9, column=0, padx=20,
-                                                                                      pady=20)
-        frame.grid(row=0, column=0, pady=(120, 0), padx=(320, 0))
+        frame = tkinter.Frame(mainframe, bg="white",relief=tkinter.GROOVE,borderwidth=1,width=820)
+        tkinter.Label(frame, text="Matching", bg="white").grid(row=7, column=0,ipadx =30,columnspan = 10)
+        tkinter.Button(frame, text="Open/Closed\nCordon", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("Directional")).grid(row=8, column=0,padx=20, pady=10)
+        tkinter.Button(frame, text="Route\nAssignment", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("First Seen/Last Seen")).grid(row=8, column=1,padx=20, pady=10)
+        tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",fg=self.tracsisBlue,command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,pady=10)
+        tkinter.Button(frame, text="Filtered\nMatching", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("Filtered")).grid(row=8, column=3, padx=20,pady=10)
+        frame.grid(row=4, column=0,pady=5,sticky="ew")
+        self.update()
+        print("size of mainframe is",mainframe.winfo_height(),mainframe.winfo_reqheight())
+        offsetForBackButton = (self.winfo_height()- (mainframe.winfo_reqheight()))/2
+        offsetForBackButton-=60
+        print("offset is",offsetForBackButton)
+        #frame = tkinter.Frame(self, bg="white", width=820)
+        tkinter.Button(self, text="Back", width=12, height=1, bg="white",fg=self.tracsisBlue,command = self.spawn_survey_setup_screen).grid(row=5, column=0, padx=60,
+                                                                                      pady=offsetForBackButton,sticky="sw")
 
     def quit_duplicates_window(self):
         self.currentJob["selectedduplicates"] = myDB.get_value_of_field(self.currentJob["id"],"selectedDuplicates")
@@ -2533,9 +2593,9 @@ class mainWindow(tkinter.Tk):
         self.overtakingPairsDict = {}
         self.comparisonDataStructure = []
         self.dataList = []
-        print(self.tree.selection()[0])
         jobname = self.tree.item(self.tree.selection()[0])
-        self.currentJob = myDB.load_job(jobname["values"][0],jobname["values"][1],jobname["values"][2])
+        self.currentJob = myDB.load_job(jobname["values"][0],jobname["values"][1], datetime.datetime.strptime(jobname["values"][2],"%d/%m/%y").date())
+        print("current job folder is2,",self.currentJob["folder"])
         title = self.currentJob["jobno"] + " " + self.currentJob["jobname"]
         self.wm_title(title)
         for site, details in self.currentJob["sites"].items():
@@ -2729,6 +2789,11 @@ class mainWindow(tkinter.Tk):
         if text == "filtered matching":
             self.filteredMatchingfunction = fun
 
+    def on_label_entry(self,event):
+        event.widget.configure(fg=self.tracsisGrey)
+
+    def on_label_exit(self,event):
+        event.widget.configure(fg=self.tracsisBlue)
 
 def format_timedelta(td):
     minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
@@ -2756,12 +2821,15 @@ class VerticalScrolledFrame(tkinter.Frame):
     """
     def __init__(self, parent, *args, **kw):
         tkinter.Frame.__init__(self, parent, *args, **kw)
-        #print("width of scroll",parent.winfo_width())
+        print("height of scroll",parent.winfo_height())
+        parentOfparent = self.nametowidget(parent.winfo_parent())
+        #parentOfparent.configure(bg="black")
+        print("parent of parent height is",parentOfparent.winfo_height())
         # create a canvas object and a vertical scrollbar for scrolling it
         vscrollbar = tkinter.Scrollbar(self, orient=tkinter.VERTICAL,bg="white")
         vscrollbar.pack(fill=tkinter.Y, side=tkinter.RIGHT, expand=tkinter.TRUE)
         self.canvas = tkinter.Canvas(self, bd=0, highlightthickness=0,bg="white",
-                        yscrollcommand=vscrollbar.set,height = 800)
+                        yscrollcommand=vscrollbar.set,height = parent.winfo_height()-64)
         self.canvas.bind_all("<MouseWheel>",self.on_mousewheel)
         self.canvas.bind("<Enter>",self.on_entry)
         self.canvas.bind("<Leave>", self.on_exit)
@@ -2788,9 +2856,9 @@ class VerticalScrolledFrame(tkinter.Frame):
             if interior.winfo_reqwidth() != self.canvas.winfo_width():
                 # update the canvas's width to fit the inner frame
                 self.canvas.config(width=interior.winfo_reqwidth())
-            #if interior.winfo_reqheight() != canvas.winfo_height():
+            #if interior.winfo_reqheight() != self.canvas.winfo_height():
                 # update the canvas's height to fit the inner frame
-                #canvas.config(height=interior.winfo_reqheight())
+                #self.canvas.config(height=interior.winfo_reqheight())
             #print("actual size is", canvas.winfo_width(), canvas.winfo_height())
         interior.bind('<Configure>', _configure_interior)
 

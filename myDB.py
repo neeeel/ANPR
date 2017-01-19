@@ -121,7 +121,7 @@ def save_Job(data,user):
     ### check job doesnt already exist
     ###
     print("looking for",job["jobname"])
-    result = cur.execute('''SELECT  * from Job where name = ? and surveyDate = ?''',(job["jobname"],datetime.datetime.strptime(job["surveyDate"],"%d/%m/%y").date()))
+    result = cur.execute('''SELECT  * from Job where name = ? and surveyDate = ?''',(job["jobname"],job["surveydate"]))
     row = result.fetchone()
     if row is not None:
         if messagebox.askyesno(message="This job already exists, do you want to overwrite it?"):
@@ -145,11 +145,10 @@ def save_Job(data,user):
             return False
         job["folder"] = dir
     print("selected job folder is",job["folder"])
-    d = datetime.datetime.strptime(job["surveyDate"],"%d/%m/%y").date()
     createdDate = datetime.datetime.today().date()
     try:
         cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate,createdBy,plateRestriction) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],d,job["timeperiod1"]
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],job["surveydate"],job["timeperiod1"]
                                                     ,job["timeperiod2"],job["timeperiod3"],job["timeperiod4"]
                                                     ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate,user,1))
     except sqlite3.OperationalError as e:
@@ -199,6 +198,7 @@ def save_Job(data,user):
         os.mkdir(job["folder"] + "/data")
     except Exception as e:
         print(e, type(e))
+    return job
 
 def load_job(jobNo,jobName,jobDate):
     global databaseFile
@@ -206,9 +206,9 @@ def load_job(jobNo,jobName,jobDate):
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
     job = {}
-    d = datetime.datetime.strptime(jobDate,"%d/%m/%y").date()
+    d = jobDate
     print(d)
-    result = cur.execute(("SELECT * FROM job WHERE name =? and jobNo = ? and surveyDate = ?"),(jobName,jobNo,d)).fetchone()
+    result = cur.execute(("SELECT * FROM job WHERE name =? and jobNo = ? and surveydate = ?"),(jobName,jobNo,d)).fetchone()
     if result is None:
         return job
     print("job id is",result[0])
@@ -220,7 +220,7 @@ def load_job(jobNo,jobName,jobDate):
     job["timeperiod2"] = result[5]
     job["timeperiod3"] = result[6]
     job["timeperiod4"] = result[7]
-    job["noofcameras"] = result[8]
+    job["noOfCameras"] = result[8]
     job["interval"] = result[9]
     job["ovtemplate"] = result[10]
     job["ovcounts"] = result[11]
@@ -238,6 +238,7 @@ def load_job(jobNo,jobName,jobDate):
     job["duplicateValues"] = []
     job["timeAdjustmentsDictionary"] = {}
     job["durationsDictionary"] = {}
+    print("on loading project, folder is",job["folder"])
     result = cur.execute("SELECT site.siteno,movement.combinedmovementnum,movement.originalmovementnum,movement.dir,movement.comment,movement.siteID FROM site JOIN job "
                          "ON site.jobno = job.ID JOIN Movement ON site.id = movement.siteid "
                          "WHERE job.id = ?",(job["id"],)).fetchall()
@@ -284,7 +285,6 @@ def load_job(jobNo,jobName,jobDate):
         sites[siteNo] = site
     result = cur.execute("SELECT id FROM site WHERE jobNo = ?",(job["id"],)).fetchall()
     for r in result:
-        #print("checking site with id",r[0])
         for c in cur.execute("SELECT comment,combinedmovementnum from movement WHERE siteId = ?  group by combinedmovementnum",(r[0],)).fetchall():
             #print("comment is",c[0])
             comments.append(c[0])

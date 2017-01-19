@@ -18,14 +18,25 @@ class MatrixDisplay():
         self.mainCanvas.bind("<Button-1>", self.main_canvas_clicked)
 
         self.verticalLabelsCanvas = tkinter.Canvas(parentFrame, bg="white", width=50, height=height, scrollregion=(0, 0, width, height),yscrollcommand=self.vbar.set)
+        self.verticalLabelsCanvas.bind("<Button-1>",self.vertical_canvas_clicked)
         self.horizontalLabelsCanvas = tkinter.Canvas(parentFrame, bg="white", width=width, height=30, scrollregion=(0, 0, width, height),xscrollcommand=self.hbar.set)
+        self.horizontalLabelsCanvas.bind("<Button-1>", self.horizontal_canvas_clicked)
         self.horizontalLabelsCanvas.grid(row=0, column=1, columnspan=1, sticky="w")
         self.verticalLabelsCanvas.grid(row=1, column=0, sticky="n")
         self.mainCanvas.grid(row=1, column=1, sticky="nw")
         self.vbar.grid(row=1, column=2, rowspan=1, sticky="NS")
         self.hbar.grid(row=2, column=1, columnspan=1, sticky="EW")
+        self.vbar.grid_remove()
+        self.hbar.grid_remove()
 
-    def draw(self,verticalLabels,horizontalLabels,data,fontsize=8):
+    def clear(self):
+        self.mainCanvas.delete(tkinter.ALL)
+        self.verticalLabelsCanvas.delete(tkinter.ALL)
+        self.horizontalLabelsCanvas.delete(tkinter.ALL)
+
+    def draw(self,verticalLabels,horizontalLabels,data,job,fontsize=8):
+        self.vbar.grid()
+        self.hbar.grid()
         self.verticalLabels = verticalLabels
         self.horizontalLabels = horizontalLabels
         self.mainCanvas.delete(tkinter.ALL)
@@ -54,12 +65,22 @@ class MatrixDisplay():
         print("setting display to ", displayWidth, displayHeight)
         print("canvas settings are", canvasWidth, canvasHeight)
 
+        mvmntColours = ["","sky blue","orange red","orange"]
+
         ###
         ### draw lines and text for rows on grid
         ###
         for mov in verticalLabels:
+            colour = "white"
+            for site, details in job["sites"].items():
+                for mvmtNo, mvmt in details.items():
+                    print("direction of movement", mvmtNo, "is", mvmt["dir"])
+                    if mov == mvmtNo:
+                        colour = mvmntColours[int(mvmt["dir"])]
             self.mainCanvas.create_line(x, y, x + ((noOfCols ) * self.columnWidth), y)
+            self.verticalLabelsCanvas.create_rectangle(x, y, x + self.columnWidth, y + self.rowHeight, fill=colour)
             y = y + self.rowHeight / 2
+
             self.verticalLabelsCanvas.create_text(x + self.columnWidth / 2, y, text=mov, font=labelfont)
             y = y + self.rowHeight / 2
             self.mainCanvas.create_line(x, y, x + ((noOfCols) * self.columnWidth), y)
@@ -73,7 +94,14 @@ class MatrixDisplay():
         # x += columnWidth
         # y += rowHeight + 10
         for mov in horizontalLabels:
+            colour = "white"
+            for site, details in job["sites"].items():
+                for mvmtNo, mvmt in details.items():
+                    #print("direction of movement", mvmtNo, "is", mvmt["dir"])
+                    if mov == mvmtNo:
+                        colour = mvmntColours[int(mvmt["dir"])]
             self.mainCanvas.create_line(x, y, x, y + ((noOfRows) * self.rowHeight))
+            self.horizontalLabelsCanvas.create_rectangle(x, y, x + self.columnWidth, y + self.rowHeight, fill=colour)
             x = x + self.columnWidth / 2
             self.horizontalLabelsCanvas.create_text(x, y + self.rowHeight / 2, text=mov, font=labelfont)
             x = x + self.columnWidth / 2
@@ -87,7 +115,7 @@ class MatrixDisplay():
         totalFont = tkinter.font.Font(family="verdana", size=fontsize)
         x, y = 0, 0
         for key, data in data.items():
-            # print(key,data)
+            print(key,data)
             i, o = key
             displayedValue = data
             try:
@@ -100,7 +128,13 @@ class MatrixDisplay():
             except ValueError as e:
                 print("error in ", key, data)
                 continue
-            self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2),text=displayedValue, font=dataFont)
+            if key[0] != "total" and key[1] != "total":
+                self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont)
+            if key[0] == "total" or key[1]=="total":
+                self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont,fill="light blue")
+            if key[0] == "total" and key[1]=="total":
+                self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont,fill = "dark blue")
+
 
         parent = self.mainCanvas.winfo_parent()
         parent = self.parentFrame.nametowidget(parent)
@@ -156,7 +190,44 @@ class MatrixDisplay():
         x, y = int((x + x_offset) / self.columnWidth) + 1, int((y + y_offset) / self.rowHeight) + 1
         self.clicked_callback_function(y,x)
 
+    def vertical_canvas_clicked(self,event):
+        if not self.clickable:
+            return None
+        x, y = event.x, event.y
+        print("clicked at", x, y)
+        #if self.clicked_callback_function is None:
+            #return
+        top, bottom = self.mainCanvas.yview()
+        left, right = self.mainCanvas.xview()
+        print(left, right, top, bottom)
+        noOfRows = len(self.verticalLabels)
+        y_offset = top * (self.rowHeight) * noOfRows
+        print("clicked in row",int((y + y_offset) / self.rowHeight),"actual value in cell",self.verticalLabels[int((y + y_offset) / self.rowHeight)])
+        if self.clicked_callback_function is not None:
+            self.clicked_callback_function(self.verticalLabels[int((y + y_offset) / self.rowHeight)])
 
+
+    def horizontal_canvas_clicked(self,event):
+        if not self.clickable:
+            return None
+        x, y = event.x, event.y
+        print("clicked at", x, y)
+        #if self.clicked_callback_function is None:
+            #return
+        top, bottom = self.mainCanvas.yview()
+        left, right = self.mainCanvas.xview()
+        print(left, right, top, bottom)
+        noOfCols = len(self.horizontalLabels)
+        x_offset = left * (self.columnWidth) * noOfCols
+        print("clicked in column",int((x + x_offset) / self.columnWidth),"actual value in cell",self.horizontalLabels[int((x + x_offset) / self.columnWidth)])
+        if self.clicked_callback_function is not None:
+            self.clicked_callback_function(self.horizontalLabels[int((x + x_offset) / self.columnWidth)])
+
+    def enable_click(self):
+        self.clickable = True
+
+    def disable_click(self):
+        self.clickable = False
 #win = tkinter.Tk()
 data = {(1,2):100,(2,3):50,(4,6):10,(4,7):12,(4,8):22,(5,2):12,(1,3):45,("total",2):56,("total","total"):56}
 v = []

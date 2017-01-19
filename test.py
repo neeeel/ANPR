@@ -28,7 +28,7 @@ def update_sites_and_movements(job):
     ###
     print("updating",job)
     dataFolder = os.path.join(job["folder"], "data")
-    job = myDB.load_job(job["jobno"],job["jobname"],datetime.datetime.strftime(job["surveydate"],"%d/%m/%y"))
+    job = myDB.load_job(job["jobno"],job["jobname"],job["surveydate"])
     job["timeAdjustmentsDictionary"] = {}
     load_job(job)
     if not df is None:
@@ -68,7 +68,7 @@ def convert_old_movement_to_new(val,job):
         for moveNo, movement in site.items():
             if val in movement["originalmovements"]:
                 # print("site",siteNo,"contains original movement",val)
-                return moveNo
+                return int(moveNo)
 
 def convert_movement_to_dir(val,job):
     ###
@@ -130,10 +130,18 @@ def load_unclassed_plates(job):
         ### set up the timediff and duplicates column
         ###
         print(df.head())
+
         df["Duplicates"] = "N"
         df["Site"] = df["Movement"].apply(convert_movement_to_site, args=(job,))
         df["newMovement"] = df["Movement"].apply(convert_old_movement_to_new, args=(job,))
+
         df["dir"] = df["newMovement"].apply(convert_movement_to_dir, args=(job,))
+
+        df = df[pd.notnull(df["newMovement"])]
+        print(df[df["newMovement"].isnull()])
+        df["newMovement"] = df["newMovement"].astype(int)
+        df["dir"] = df["dir"].astype(int)
+
         df.sort_values(by=["VRN", "newMovement"], inplace=True, ascending=[True, True])
         df["timeDiff"] = df["Date"].diff()
         df.set_index(["Date"],inplace=True)
@@ -291,6 +299,8 @@ def load_classes(job):
         df.to_pickle(dataFolder + "/classedData.pkl")
         df.to_csv("dumped.csv")
         myDB.update_job_with_progress(job["id"], "classed")
+        df["newMovement"] = df["newMovement"].astype(int)
+        df["dir"] = df["dir"].astype(int)
         compute_comparison_data(job)
         threading.Thread(target=produce_full_routes,args=(job,)).start()
     except FileNotFoundError as e:
@@ -298,6 +308,7 @@ def load_classes(job):
         df = None
         return
     print("after loading classes, lenght is",len(df))
+    print(df.head())
     compute_comparison_data(job)
 
 def save_job(job):
@@ -346,6 +357,11 @@ def load_job(job):
         print("ERRRRRRRROR")
         df = None
         return False
+    df = df[pd.notnull(df["newMovement"])]
+    print(df[df["newMovement"].isnull()])
+    df["newMovement"]= df["newMovement"].astype(int)
+    df["dir"] = df["dir"].astype(int)
+    print(df.head())
 
     ###
     ### restrict plates based on length
@@ -893,6 +909,8 @@ def calculate_nondirectional_cordon(job):
     ###
     temp.sort_values(by=["VRN"], inplace=True, ascending=[True])
     temp["duration"] = temp["duration"].apply(format_timedelta)
+    temp["Date"] = temp["Date"].apply(datetime.datetime.strftime,args=("%H:%M:%S",))
+    temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     temp = temp[["VRN", "Class", "newMovement", "Date", "outMovement", "outTime", "duration"]]
     try:
         temp.to_csv(outputFolder + "/" + job["jobno"] + " " + job["jobname"] + " Cordon - in-out non-directional " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y")
@@ -933,9 +951,9 @@ def calculate_cordon_in_out_only(job,checkboxes):
     outMov = []
     for site, details in job["sites"].items():
         for mvmtNo, mvmt in details.items():
-            if mvmt["dir"] == 1 or mvmt["dir"] == 3:
+            if not int(mvmt["newmovement"]) in inMov:
                 inMov.append(int(mvmt["newmovement"]))
-            if mvmt["dir"] == 2 or mvmt["dir"] == 3:
+            if not int(mvmt["newmovement"]) in outMov:
                 outMov.append(int(mvmt["newmovement"]))
 
     ###
@@ -958,6 +976,19 @@ def calculate_cordon_in_out_only(job,checkboxes):
     for index in range(0,len(times)-1,2):
         print("Processing times",times[index],times[index+1])
         temp = fullDf.between_time(times[index],times[index+1],include_end=False)
+
+        ###
+        ###
+        ###
+
+        temp = temp[temp["newMovement"] >= 0]
+
+        ###
+        ###
+        ###
+
+
+
         print("temp",temp.head())
         temp.index.name= "Date"
         temp.reset_index(inplace=True)
@@ -1031,12 +1062,16 @@ def calculate_cordon_in_out_only(job,checkboxes):
         for val in r[1]:
             resultsDict[r[0]].append(val)
     temp["duration"] = temp["duration"].apply(format_timedelta)
+    temp["Date"] = temp["Date"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
+    temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     temp = temp[["VRN","Class","newMovement","Date","outMovement","outTime","duration"]]
     temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
     try:
         temp.to_csv(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Cordon - in-out directional " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv",header=["VRN","Class","In Movement","Time","Out Movement","Time","Duration"],index=False)
     except PermissionError as e:
         messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+    print("results dict")
+    print(resultsDict)
     return [resultsDict,inTotals[0].values.tolist(),outTotals[0].values.tolist()]
 
 def calculate_cordon_traversal_split_by_in_out(job,filters=None):
@@ -1297,6 +1332,8 @@ def calculate_route_assignment_fs_ls(job,filters=None):
 
 
     temp["duration"] = temp["duration"].apply(format_timedelta)
+    temp["Date"] = temp["Date"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
+    temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     del temp["Movement"]
     del temp["Duplicates"]
     del temp["Site"]
@@ -1379,6 +1416,8 @@ def calculate_route_assignment_journey_pairs(job):
     print(resultsDict)
 
     temp["duration"] = temp["duration"].apply(format_timedelta)
+    temp["Date"] = temp["Date"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
+    temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     del temp["Movement"]
     del temp["Duplicates"]
     del temp["Site"]
@@ -1513,7 +1552,7 @@ def produce_full_routes(job):
         print("before removing singletons", len(temp))
         temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
         print("after removing", len(temp))
-
+        print(temp.head())
 
         ###
         ### group by VRN, and then join each group together into 1 row in a dataframe
@@ -1542,7 +1581,6 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     dataFolder = os.path.join(job["folder"], "data")
     outputFolder = os.path.join(job["folder"], "output")
     journeys = pd.read_pickle(dataFolder + "/all journeys as list.pkl")
-
     inMov = []
     outMov = []
     bothMov = []
@@ -1618,6 +1656,7 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     ###
 
     for r in result:
+        print("result blah",r)
         for item in range(2,len(r),2): ### traverse along the journey, picking out every 2nd value , which is the movement number
             movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
             movementCounts[int(r[item])]+=1
@@ -1912,7 +1951,10 @@ def resample_overtaking_data(job,df,time_as_string,pair):
     startTime = datetime.datetime.strptime(times[0], "%H:%M").replace(minute=0, second=0)
     endTime = datetime.datetime.strptime(times[-1], "%H:%M")
     if endTime.minute > 0:
-        endTime.replace(hour=endTime.hour + 1, minute=0, second=0)
+        if endTime.hour < 23:
+            endTime.replace(hour=endTime.hour + 1, minute=0, second=0)
+        else:
+            endTime.replace(hour=23, minute=59, second=0)
     rng = pd.date_range(d + " " + startTime.strftime("%H:%M"), d + " " + endTime.strftime("%H:%M"), freq="60T", closed="left")
     indexDf = pd.DataFrame(index=rng)
 
@@ -2036,8 +2078,12 @@ def calculate_platooning(job,movement,platooningTime):
 
         startTime = datetime.datetime.strptime(times[index], "%H:%M").replace(minute=0,second=0)
         endTime = datetime.datetime.strptime(times[index + 1], "%H:%M")
-        if endTime.minute >0:
-            endTime.replace(hour=endTime.hour+1,minute=0,second=0)
+        print(startTime,endTime)
+        if endTime.minute >0 :
+            if endTime.hour <23:
+                endTime.replace(hour=endTime.hour+1,minute=0,second=0)
+            else:
+                endTime.replace(hour=23, minute=59, second=0)
 
         ###
         ### set up the summary list for the platooning info
@@ -2098,7 +2144,7 @@ def calculate_platooning(job,movement,platooningTime):
     try:
         wb = openpyxl.load_workbook(filename)
     except FileNotFoundError as e:
-        wb = openpyxl.Workbook(optimized_write=True)
+        wb = openpyxl.Workbook()
     try:
         sht = wb.get_sheet_by_name("Movement " + str(movement))
         tempSheet = wb.create_sheet(title="temp")
