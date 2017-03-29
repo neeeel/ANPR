@@ -19,6 +19,7 @@ import re
 import csv
 import matrix
 import copy
+import pandas as pd
 
 
 class mainWindow(tkinter.Tk):
@@ -72,7 +73,7 @@ class mainWindow(tkinter.Tk):
         self.configure(bg = "white")
         self.jobListBox = None
         self.matrixData = None
-
+        self.scrollFrame = None
         self.currentJob = None
         self.durationsDictionary = None
         self.selectedDuplicates = None
@@ -83,26 +84,13 @@ class mainWindow(tkinter.Tk):
 
         self.menubar = tkinter.Menu(self)
         menu = tkinter.Menu(self.menubar, tearoff=0)
-        menu.add_command(label="Load TPs")
-        menu.add_separator()
-        menu.add_command(label="Export")
-        self.menubar.add_cascade(label="File", menu=menu)
-        self.config(menu=self.menubar)
-        menu = tkinter.Menu(self.menubar, tearoff=0)
-        menu.add_command(label="Journey Time Settings")
-        # menu.add_separator()
-        # menu.add_command(label = "Excel Settings",command = self.spawn_excel_window)
-        self.menubar.add_cascade(label="Settings", menu=menu)
-
-        self.menubar = tkinter.Menu(self)
-        menu = tkinter.Menu(self.menubar, tearoff=0)
-        menu.add_command(label="Load Settings", command=self.spawn_settings_window)
-        menu.add_separator()
-        menu.add_command(label="l")
+        menu.add_command(label="Change Settings", command=self.spawn_settings_window)
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
-        self.user,file=self.load_settings()
-        if self.user == "" or file == "":
+        self.Dbfile = ""
+        self.user = ""
+        self.user,self.Dbfile=self.load_settings()
+        if self.user == "" or self.Dbfile == "":
             self.spawn_settings_window()
         else:
             self.spawn_survey_setup_screen()
@@ -391,10 +379,12 @@ class mainWindow(tkinter.Tk):
         ### when a user clicks on a movement number on the matrix
         ### the type of movement ( in, out, or both) is displayed in radio buttons
         ### in the extrasFrame of the matching results screen
-
+        print("in matrix label clicked")
         if selectedMovement is None:
+            print("no selected movement")
             return
         if self.radioVar is None:
+            print("no radiovar")
             return
         if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
             label = self.nametowidget(self.winfo_children()[2])
@@ -413,11 +403,32 @@ class mainWindow(tkinter.Tk):
                 #print("direction of movement",mvmtNo,"is",mvmt["dir"])
                 if selectedMovement == mvmtNo:
                     #print("woohoo")
-                    lbl = self.nametowidget(extrasFrame.winfo_children()[0])
-                    lbl.configure(text="Movement "+ str(selectedMovement))
+                    #lbl = self.nametowidget(extrasFrame.winfo_children()[1])
+                    #lbl.configure(text="Movement "+ str(selectedMovement))
                     self.radioVar.trace_vdelete("w",self.radioVar.trace_id)
                     self.radioVar.set(mvmt["dir"])
                     self.radioVar.trace_id = self.radioVar.trace("w", self.direction_of_movement_changed)
+                    self.display_movement_percentages(selectedMovement)
+
+    def display_movement_percentages(self,selectedMovement):
+        ###
+        ### on each match screen, when user clicks on a movement label in the matrix, we want to display the
+        ### percentage match for that movement.
+        ###
+
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
+            label = self.nametowidget(self.winfo_children()[2])
+            innerframe = self.nametowidget(self.winfo_children()[1])
+        else:
+            frame = self.nametowidget(self.winfo_children()[1])
+            innerframe = self.nametowidget(frame.winfo_children()[0])
+        extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
+        frame = self.nametowidget(extrasFrame.winfo_children()[0])
+        children = frame.winfo_children()
+        self.nametowidget(children[5]).configure(text=str(selectedMovement))
+        self.nametowidget(children[6]).configure(text=self.currentJob["movementCounts"][selectedMovement][0])
+        self.nametowidget(children[7]).configure(text=self.currentJob["movementCounts"][selectedMovement][1])
+        self.nametowidget(children[8]).configure(text=self.currentJob["movementCounts"][selectedMovement][2])
 
     def direction_of_movement_changed(self,*args):
         ###
@@ -432,8 +443,10 @@ class mainWindow(tkinter.Tk):
             frame = self.nametowidget(self.winfo_children()[1])
             innerframe = self.nametowidget(frame.winfo_children()[0])
         extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
-        lbl = self.nametowidget(extrasFrame.winfo_children()[0])
-        selectedMovement = lbl.cget("text").replace("Movement ","")
+        frame = self.nametowidget(extrasFrame.winfo_children()[0])
+        children = frame.winfo_children()
+        selectedMovement =  self.nametowidget(children[5]).cget("text")
+        print("selectedmovement is",selectedMovement)
         if selectedMovement == "":
             return
         print("movement number from label is",selectedMovement)
@@ -457,7 +470,7 @@ class mainWindow(tkinter.Tk):
                     sites.append([site,mvmtNo,m,mvmt["dir"],""])
         data["sites"] = sites
         myDB.save_Job(data,self.user)
-        self.updateDataFunction(self.currentJob)
+        #self.updateDataFunction(self.currentJob)
         self.oldJobData = copy.deepcopy(self.currentJob)
 
     ###
@@ -466,21 +479,30 @@ class mainWindow(tkinter.Tk):
 
 
     def spawn_matching_results_screen(self,matchingType):
+
+        if self.oldJobData is not None:
+            self.currentJob = copy.deepcopy(self.oldJobData)
+            self.oldJobData = None
+
         self.radioVar = None ### we only want a radioVar to exist for non directional matching.
         self.oldJobData = None ### we only want this to exist for non directional matching
         for child in self.winfo_children():
             if type(self.nametowidget(child)) != tkinter.Toplevel:
                 child.destroy()
-        if self.winfo_screenheight() >800:
+        print("screen settings")
+        print("actual screen dimensions",self.winfo_screenwidth(),self.winfo_screenheight())
+        print("window dimensions",self.winfo_width(),self.winfo_height())
+        if self.winfo_screenheight() >900:
             width = 1000
             height = 800
         else:
-            width = 700
-            height = 500
+            width = self.winfo_screenwidth() - 300
+            height = self.winfo_screenheight() - 200
+        print("set width and height to ",width,height)
         f = tkinter.font.Font(family="Helvetica", size=18, weight=tkinter.font.BOLD)
-        tkinter.Label(self, bg="white", text=matchingType + " Matching", font=f, fg=self.tracsisBlue).grid(row=0,column=0,columnspan=2,pady = 20)
+        tkinter.Label(self, bg="white", text=matchingType + " Matching", font=f, fg=self.tracsisBlue).grid(row=0,column=0,columnspan=3,pady = 20)
 
-        outerFrame = tkinter.Frame(self,bg="white",width = 220,height = height, relief=tkinter.GROOVE, borderwidth=3)
+        outerFrame = tkinter.Frame(self,bg="white",width = 240,height = height, relief=tkinter.GROOVE, borderwidth=3)
         outerFrame.grid(row=1,column=0,padx=10,sticky="ns")
         outerFrame.grid_propagate(False)
         controlPanel = tkinter.Frame(outerFrame,bg="white")
@@ -490,29 +512,42 @@ class mainWindow(tkinter.Tk):
         box.grid(row=0,column=0,pady=10)
         box.current(0)
         tkinter.Button(controlPanel, text="Match", bg="white", height=2, width=12,command=lambda: self.get_matches(matchingType)).grid(row=1,column=0,pady=10)
-        extrasFrame = None
-
+        extrasFrame = tkinter.Frame(controlPanel, bg="white")
+        f = tkinter.font.Font(family="helvetica", size=8)
+        frame = tkinter.Frame(extrasFrame, bg="white", relief=tkinter.RAISED, borderwidth=1)
+        tkinter.Label(frame, text="Matched %ages", font=f, bg="Light blue").grid(row=0, column=0, columnspan=10,sticky="ew")
+        tkinter.Label(frame, text="Mvmt", font=f, bg="Light blue").grid(row=1, column=0, sticky="ew")
+        tkinter.Label(frame, text="Plates", font=f, bg="Light blue").grid(row=1, column=1, sticky="ew")
+        tkinter.Label(frame, text="Matches", font=f, bg="Light blue").grid(row=1, column=2, sticky="ew")
+        tkinter.Label(frame, text="Matched %", font=f, bg="Light blue").grid(row=1, column=3, sticky="ew")
+        tkinter.Label(frame, text="", bg="white", font=f).grid(row=2, column=0)
+        tkinter.Label(frame, text="0", bg="white", font=f).grid(row=2, column=1)
+        tkinter.Label(frame, text="0", bg="white", font=f).grid(row=2, column=2)
+        tkinter.Label(frame, text="0%", bg="white", font=f).grid(row=2, column=3)
+        frame.grid(row=0, column=0, pady=(0, 10),columnspan=2)
+        matrixFrame = tkinter.Frame(self, relief=tkinter.GROOVE, borderwidth=3, bg="white", width=width, height=height)
+        self.matrix = matrix.MatrixDisplay(matrixFrame, width, height)
+        self.matrix.enable_click()
+        self.matrix.set_matrix_clicked_callback_function(self.display_movement_percentages)
         if matchingType == "Directional":
             f = tkinter.font.Font(family="courier", size=8)
-            extrasFrame = tkinter.Frame(controlPanel,bg="white")
             var = tkinter.IntVar()
-            ch = tkinter.Checkbutton(extrasFrame, text="In-Out", font=f, bg="white", variable=var)
-            ch.grid(row=0, column=0,sticky = "w")
+            ch = tkinter.Checkbutton(extrasFrame, text="In-Out   ", font=f, bg="white", variable=var)
+            ch.grid(row=1, column=0, columnspan=4)
             ch.select()
             ch.var = var
             var = tkinter.IntVar()
-            ch = tkinter.Checkbutton(extrasFrame, text="In-Both", font=f, bg="white", variable=var)
-            ch.grid(row=1, column=0,sticky = "w")
+            ch = tkinter.Checkbutton(extrasFrame, text="In-Both  ", font=f, bg="white", variable=var)
+            ch.grid(row=2, column=0, columnspan=4)
             ch.var = var
             var = tkinter.IntVar()
-            ch = tkinter.Checkbutton(extrasFrame, text="Both-Out", font=f, bg="white", variable=var)
-            ch.grid(row=2, column=0,sticky = "w")
+            ch = tkinter.Checkbutton(extrasFrame, text="Both-Out ", font=f, bg="white", variable=var)
+            ch.grid(row=3, column=0, columnspan=4)
             ch.var = var
             var = tkinter.IntVar()
             ch = tkinter.Checkbutton(extrasFrame, text="Both-Both", font=f, bg="white", variable=var)
-            ch.grid(row=3, column=0,sticky = "w")
+            ch.grid(row=4, column=0, columnspan=4)
             ch.var = var
-            extrasFrame.grid(row=2, column=0, pady=10)
             f = tkinter.font.Font(family='Arial', size=8)
             l = tkinter.Label(controlPanel,text="Switch to Non Directional",font = f,bg="white")
             l.grid(row=3,column=0,padx =10)
@@ -523,15 +558,14 @@ class mainWindow(tkinter.Tk):
 
         if matchingType == "Non Directional":
             f = tkinter.font.Font(family="courier", size=8)
-            extrasFrame = tkinter.Frame(controlPanel, bg="white")
             self.radioVar = tkinter.IntVar()
-            tkinter.Label(extrasFrame,text="Movement ",bg="white",font = f).grid(row=0)
+            self.matrix.set_matrix_clicked_callback_function(self.matrix_label_clicked)
+            #tkinter.Label(extrasFrame,text="Movement ",bg="white",font = f).grid(row=1,column=0)
             self.radioVar.trace_id = self.radioVar.trace("w",self.direction_of_movement_changed)
-            tkinter.Radiobutton(extrasFrame, text="In", bg="white", font=f, value=1,variable=self.radioVar,state="disabled").grid(row=1, column=0)
-            tkinter.Radiobutton(extrasFrame, text="Out", bg="white", font=f, value=2,variable=self.radioVar,state="disabled").grid(row=2, column=0)
-            tkinter.Radiobutton(extrasFrame, text="Both", bg="white", font=f, value=3,variable=self.radioVar,state="disabled").grid(row=3, column=0)
-            tkinter.Button(extrasFrame,text="Save",font=f,command=self.save_changes_to_movement_directions).grid(row=4,column=0)
-            extrasFrame.grid(row=2, column=0, pady=10)
+            tkinter.Radiobutton(extrasFrame, text="In  ", bg="white", font=f, value=1,variable=self.radioVar,state="disabled").grid(row=2, column=0)
+            tkinter.Radiobutton(extrasFrame, text="Out ", bg="white", font=f, value=2,variable=self.radioVar,state="disabled").grid(row=3, column=0)
+            tkinter.Radiobutton(extrasFrame, text="Both", bg="white", font=f, value=3,variable=self.radioVar,state="disabled").grid(row=4, column=0)
+            tkinter.Button(extrasFrame,text="Save",font=f,command=self.save_changes_to_movement_directions).grid(row=5,column=0)
             f = tkinter.font.Font(family='Arial', size=8)
             l = tkinter.Label(controlPanel, text="Switch to Directional", font=f, bg="white")
             l.grid(row=3, column=0, padx=10)
@@ -539,19 +573,30 @@ class mainWindow(tkinter.Tk):
             l.bind("<Leave>", self.on_label_exit)
             l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("Directional"))
 
+
         if matchingType == "First Seen/Last Seen":
             f = tkinter.font.Font(family="courier", size=8)
-            extrasFrame = tkinter.Frame(controlPanel, bg="white")
             f = tkinter.font.Font(family='Arial', size=8)
             l = tkinter.Label(controlPanel, text="Switch to Journey Pairs", font=f, bg="white")
             l.grid(row=3, column=0, padx=10)
             l.bind("<Enter>", self.on_label_entry)
             l.bind("<Leave>", self.on_label_exit)
             l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("All Journey Pairs"))
+            var = tkinter.IntVar()
+            tkinter.Label(extrasFrame,text="(applies to full journeys only)", font=f).grid(row=6,column=0,columnspan=3)
+            check = tkinter.Checkbutton(extrasFrame, text="Duration Check", bg="white", font=f,
+                                        command=lambda: self.duration_check_selected(var), variable=var)
+            check.grid(row=7, column=0, columnspan=3)
+            check.var = var
+            self.durationVar = tkinter.IntVar()
+            tkinter.Radiobutton(extrasFrame, text="Split   ", bg="white", font=f, variable=self.durationVar, value=1,
+                                state="disabled").grid(row=8, column=0, columnspan=3)
+            tkinter.Radiobutton(extrasFrame, text="Discard", bg="white", font=f, variable=self.durationVar, value=2,
+                                state="disabled").grid(row=9, column=0, columnspan=3)
+            self.durationVar.set(1)
 
         if matchingType == "All Journey Pairs":
             f = tkinter.font.Font(family="courier", size=8)
-            extrasFrame = tkinter.Frame(controlPanel, bg="white")
             f = tkinter.font.Font(family='Arial', size=8)
             l = tkinter.Label(controlPanel, text="Switch to First Seen/Last Seen", font=f, bg="white")
             l.grid(row=3, column=0, padx=10)
@@ -560,31 +605,30 @@ class mainWindow(tkinter.Tk):
             l.bind("<Button-1>", lambda event: self.spawn_matching_results_screen("First Seen/Last Seen"))
 
         if matchingType == "Filtered":
-            f = tkinter.font.Font(family="helvetica", size=8)
-            extrasFrame = tkinter.Frame(controlPanel, bg="white")
-            extrasFrame.grid(row=2, column=0, pady=10)
-            tkinter.Label(extrasFrame,text="Enter Filter String",bg="white",font = f).grid(row=0,column=0, columnspan=3)
+
+
+            tkinter.Label(extrasFrame,text="Enter Filter String",bg="white",font = f).grid(row=1,column=0, columnspan=3)
             e = tkinter.Entry(extrasFrame, width=15)
-            e.grid(row=1, column=0, padx=10, pady=10, columnspan=3)
-            tkinter.Label(extrasFrame, text="Current Filters", bg="white", font=f).grid(row=2, column=0, columnspan=3)
+            e.grid(row=2, column=0, padx=10, pady=10, columnspan=3)
+            tkinter.Label(extrasFrame, text="Current Filters", bg="white", font=f).grid(row=3, column=0, columnspan=3)
             lb = tkinter.Listbox(extrasFrame, bg="white", font=f)
             lb.bind("<Double-Button-1>", self.remove_filter)
-            lb.grid(row=3, column=0, columnspan=3)
+            lb.grid(row=4, column=0, columnspan=3)
             e.bind("<Return>", lambda event: self.add_filter(event, lb))
             tkinter.Button(extrasFrame, text="Clear", bg="white", height=1, width=5,
-                           command=lambda: lb.delete(0, tkinter.END)).grid(row=4, column=0, pady=10)
+                           command=lambda: lb.delete(0, tkinter.END)).grid(row=5, column=0, pady=10)
             tkinter.Button(extrasFrame, text="Run", bg="white", height=1, width=5,
-                           command=lambda: self.get_matches("Filtered")).grid(row=4, column=1, pady=10)
+                           command=lambda: self.get_matches("Filtered")).grid(row=5, column=1, pady=10)
             var = tkinter.IntVar()
             check = tkinter.Checkbutton(extrasFrame, text="Duration Check", bg="white", font=f,
                                         command=lambda: self.duration_check_selected(var), variable=var)
-            check.grid(row=5, column=0, columnspan=3)
+            check.grid(row=6, column=0, columnspan=3)
             check.var = var
             self.durationVar = tkinter.IntVar()
             tkinter.Radiobutton(extrasFrame, text="Split   ", bg="white", font=f, variable=self.durationVar, value=1,
-                                state="disabled").grid(row=6, column=0, columnspan=3)
-            tkinter.Radiobutton(extrasFrame, text="Discard", bg="white", font=f, variable=self.durationVar, value=2,
                                 state="disabled").grid(row=7, column=0, columnspan=3)
+            tkinter.Radiobutton(extrasFrame, text="Discard", bg="white", font=f, variable=self.durationVar, value=2,
+                                state="disabled").grid(row=8, column=0, columnspan=3)
             self.durationVar.set(1)
 
 
@@ -594,25 +638,20 @@ class mainWindow(tkinter.Tk):
         controlPanel.grid_configure(padx = (198-controlPanel.winfo_width())/2)
         if extrasFrame is not None:
             extrasFrame.grid(row=2,column=0,pady=10)
-        matrixFrame = tkinter.Frame(self, relief=tkinter.GROOVE, borderwidth=3, bg="white", width=width, height=height)
         matrixFrame.grid(row=1, column=1)
         matrixFrame.grid_propagate(False)
-        self.matrix = matrix.MatrixDisplay(matrixFrame, width, height)
-        if matchingType == "Non Directional":
-            self.matrix.enable_click()
-            self.matrix.set_matrix_clicked_callback_function(self.matrix_label_clicked)
         tkinter.Button(self, text="Back", bg="white",command=self.spawn_home_window,width=12).grid(row=4, column=0, padx=10, pady=10,sticky = "s")
 
     def get_matches(self,matchType):
         if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
-            label = self.nametowidget(self.winfo_children()[2])
-            innerframe = self.nametowidget(self.winfo_children()[1])
+            print("duration matrix open")
+            innerframe = self.nametowidget(self.winfo_children()[2])
         else:
-            frame = self.nametowidget(self.winfo_children()[1])
-            innerframe = self.nametowidget(frame.winfo_children()[0])
+            innerframe = self.nametowidget(self.winfo_children()[1])
+        controlPanel = self.nametowidget(innerframe.winfo_children()[0])
+        extrasFrame = self.nametowidget(controlPanel.winfo_children()[2])
         if matchType == "Directional":
             checkboxes = []
-            extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
             for child in extrasFrame.winfo_children():
                 if type(child) == tkinter.Checkbutton:
                     checkboxes.append(self.nametowidget(child).var.get())
@@ -623,17 +662,24 @@ class mainWindow(tkinter.Tk):
         if matchType == "All Journey Pairs":
             self.matrixData = self.getJourneyPairsFunction(self.currentJob)
         if matchType == "First Seen/Last Seen":
-            self.matrixData = self.getRouteAssignmentFsLsFunction(self.currentJob,None)
+            for child in extrasFrame.winfo_children():
+                widget = self.nametowidget(child)
+                if type(self.nametowidget(child)) == tkinter.Checkbutton:
+                    durationCheck = widget.var.get()
+            self.matrixData = self.getRouteAssignmentFsLsFunction(self.currentJob,durationCheck,self.durationVar.get(),None)
         if matchType == "Filtered":
-            extrasFrame = self.nametowidget(innerframe.winfo_children()[2])
             filters = []
             durationCheck = 0
-            lb = self.nametowidget(extrasFrame.winfo_children()[3])
-            for row in lb.get(0, tkinter.END):
-                try:
-                    filters.append(row)
-                except Exception as e:
-                    pass
+            lb = self.nametowidget(extrasFrame.winfo_children()[4])
+            if lb.get(0) == "ALL":
+                filters = ["I-B*-O", "(I-B-B*)-I", "O-(B-B*-O)", "I-B-B*!", "^B-B*-O", "^B-B-B*!"]
+            else:
+                for row in lb.get(0, tkinter.END):
+                    try:
+                        filters.append(row)
+                    except Exception as e:
+                        pass
+            print("filters are",filters)
             for child in extrasFrame.winfo_children():
                 widget = self.nametowidget(child)
                 if type(self.nametowidget(child)) == tkinter.Checkbutton:
@@ -695,6 +741,8 @@ class mainWindow(tkinter.Tk):
         event.widget.delete(0,tkinter.END)
 
     def validate_filter(self,filter):
+        if filter == "ALL":
+            return True
         if "(" in filter:
             if (")" in filter and filter.index("(") > filter.index(")")) or not ")" in filter:
                 messagebox.showinfo(message="Incorrect Brackets")
@@ -829,14 +877,15 @@ class mainWindow(tkinter.Tk):
 
     def duration_check_selected(self,var):
         value = var.get()
-        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
-
-            frame = self.nametowidget(self.winfo_children()[1])
+        if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel: ### another window is open
+            print("duration matrix open")
+            innerframe = self.nametowidget(self.winfo_children()[2])
         else:
-            frame = self.nametowidget(self.winfo_children()[1])
-            innerframe = self.nametowidget(frame.winfo_children()[0])
-        checkboxFrame = innerframe.winfo_children()[2]
-        for child in checkboxFrame.winfo_children():
+            innerframe = self.nametowidget(self.winfo_children()[1])
+        controlPanel = self.nametowidget(innerframe.winfo_children()[0])
+        extrasFrame = self.nametowidget(controlPanel.winfo_children()[2])
+
+        for child in extrasFrame.winfo_children():
             widget = self.nametowidget(child)
             if type(self.nametowidget(child)) == tkinter.Radiobutton:
                 if value == 1:
@@ -856,12 +905,16 @@ class mainWindow(tkinter.Tk):
         ###
         filters = []
         durationCheck = 0
-        for row in lb.get(0, tkinter.END):
-            try:
-                filters.append(row)
-            except Exception as e:
-                pass
-
+        print("first row of list is",lb.get(0))
+        if lb.get(0) == "ALL":
+            filters = ["I-B*-O","(I-B-B*)-I","O-(B-B*-O)","I-B-B*!","^B-B*-O","^B-B-B*!"]
+        else:
+            for row in lb.get(0, tkinter.END):
+                try:
+                    filters.append(row)
+                except Exception as e:
+                    pass
+        print("filters are",filters)
         if type(self.nametowidget(self.winfo_children()[0])) == tkinter.Toplevel:
             frame = self.nametowidget(self.winfo_children()[1])
         else:
@@ -931,7 +984,7 @@ class mainWindow(tkinter.Tk):
         frame = tkinter.Frame(win, bg="white", relief=tkinter.GROOVE, borderwidth=3, width=800, height=800)
         frame.grid(row = 1,column=0,columnspan = 3,padx=10,pady=10)
         self.durationMatrix = matrix.MatrixDisplay(frame, width, height)
-        self.durationMatrix.clicked_callback_function=self.duration_matrix_clicked
+        self.durationMatrix.set_matrix_clicked_callback_function(self.duration_matrix_clicked,True)
         self.draw_duration_matrix_screen()
 
     def fill_duration_matrix(self,e):
@@ -999,7 +1052,7 @@ class mainWindow(tkinter.Tk):
         self.currentJob["durationsDictionary"]=self.durationsDictionary
         with open(self.currentJob["folder"] + "/data/durations.pkl","wb") as f:
             pickle.dump(self.durationsDictionary,f)
-        self.durationMatrix.draw(inMov,outMov,self.durationsDictionary)
+        self.durationMatrix.draw(inMov,outMov,self.durationsDictionary,self.currentJob)
 
     def duration_matrix_clicked(self,row,column):
 
@@ -1078,13 +1131,13 @@ class mainWindow(tkinter.Tk):
         for child in self.winfo_children():
             child.destroy()
         self.wm_title("Project Setup")
+
         self.menubar = tkinter.Menu(self)
         menu = tkinter.Menu(self.menubar, tearoff=0)
-        menu.add_command(label="Load Settings", command=self.spawn_settings_window)
-        menu.add_separator()
-        menu.add_command(label="l")
+        menu.add_command(label="Change Settings", command=self.spawn_settings_window)
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
+
         frame = tkinter.Frame(self,  bg="white")
         print("screenheight is ",self.winfo_screenheight())
         treefontsize = 8
@@ -1094,7 +1147,7 @@ class mainWindow(tkinter.Tk):
             fontsize = 10
             treefontsize = 7
             headingWidth = 100
-        if self.winfo_screenheight() < 800:
+        if self.winfo_screenheight() < 900:
             fontsize = 8
             treefontsize = 8
             headingWidth = 85
@@ -1131,7 +1184,7 @@ class mainWindow(tkinter.Tk):
                 self.tree.insert("","end",values =job,tags=("tree","even"))
             else:
                 self.tree.insert("", "end", values=job, tags=("tree", "odd"))
-        self.tree.configure(height =len(self.joblist))
+        #self.tree.configure(height =len(self.joblist))
         frame.grid(row=1, column=0,padx=(120,0))
 
     def spawn_parameters_window(self):
@@ -1244,7 +1297,9 @@ class mainWindow(tkinter.Tk):
 
         frame = tkinter.Frame(outerFrame, bg="white", width=300, height=70)
         tkinter.Button(frame, text="Back", bg="white",command=self.spawn_survey_setup_screen).grid(row=0, column=0, padx=10,sticky="w")
-        tkinter.Button(frame,text="Save",bg = "white",command=self.save_job).grid(row=0,column=1,padx = 10,sticky = "e")
+        tkinter.Button(frame, text="Import", bg="white",command=self.import_movement_details_from_excel).grid(row=0, column=1, padx=10,sticky="w")
+        tkinter.Button(frame,text="Save",bg = "white",command=self.save_job).grid(row=0,column=2,padx = 10,sticky = "e")
+
         frame.grid(row=3,column=1,padx = 10,pady=10)
         classificationFrame.grid(row=0, column=1,rowspan  =3)
 
@@ -1273,6 +1328,44 @@ class mainWindow(tkinter.Tk):
         self.movementsFrame.grid(row=1,column  = 0,columnspan = 6,padx =0,pady=0)
         movementsFrame.grid(row=0, column=1, pady=(10, 0),padx=10)
         self.update()
+
+    def import_movement_details_from_excel(self):
+        file = filedialog.askopenfilename()
+        if file == "" or (not ".xls" in file and not ".xlsx" in file and not ".xlsm" in file):
+            messagebox.showinfo(message="You need to select an excel sheet")
+            return
+        try:
+            df = pd.read_excel(file,converters={0:int,1:str,2:int,3:int,4:str})
+            df["Original Movement"] = df["Original Movement"].fillna(0)
+            df["Direction"] = df["Direction"].fillna("0")
+            df["Direction"] = df["Direction"].apply(str.lower)
+            df["Direction"][df["Direction"] == "in"] = 1
+            df["Direction"][df["Direction"] == "out"] = 2
+            df["Direction"][df["Direction"] == "both"] = 3
+            df["Direction"] = df["Direction"].apply(int)
+            df = df.fillna("")
+            if df.columns.tolist() == ['Site', 'Cam', 'Original Movement', 'New Movement', 'Direction']:
+                numMovements = df["Original Movement"].max()
+                if numMovements & 1:
+                    numMovements+=1
+                self.entryValues[12].set(int(numMovements/2))
+                self.update_movement_window()
+                if len(self.entryValues) > 33:
+                    for i in range(0, len(self.entryValues[33:]), 4):
+                        for index, item in df.iterrows():
+                            if int(i/4) + 1 == int(item[2]) and item[3] != "":
+                                self.entryValues[33 + i].set(item[0])
+                                self.entryValues[33 + i + 2].set(item[3])
+                                self.entryValues[33 + i + 3].set(item[4])
+            else:
+                messagebox.showinfo(message="Incorrect format, expected headers of \n" + ",".join(
+                    ['Site', 'Cam', 'Original Movement', 'New Movement', 'Direction']) + " but got \n" + ",".join(
+                    df.columns.tolist()))
+                return
+        except ValueError as e:
+            messagebox.showinfo(message="Couldnt import file, incorrect file")
+            print(e)
+            return
 
     def edit_job(self):
         if self.tree.selection() == "":
@@ -1522,7 +1615,11 @@ class mainWindow(tkinter.Tk):
 
         job["jobno"] = self.entryValues[0].get()
         job["jobname"]=self.entryValues[1].get()
-        job["surveydate"]= datetime.datetime.strptime(self.entryValues[2].get() ,"%d/%m/%y").date()
+        try:
+            job["surveydate"]= datetime.datetime.strptime(self.entryValues[2].get() ,"%d/%m/%y").date()
+        except Exception as e:
+            messagebox.showinfo(message="Incorrect date format, project not saved")
+            return
 
         for i in range(3,11,2):
             try:
@@ -1620,24 +1717,24 @@ class mainWindow(tkinter.Tk):
         ### set up the label frame
         ###
 
-        scrollframe = VerticalScrolledFrame(self.movementsFrame,bg="beige")
+        self.scrollFrame = VerticalScrolledFrame(self.movementsFrame,bg="beige")
         vcmd = (self.register(self.validate_is_numeric_only), "%d", "%s", "%S")
         for i in range(count):
             self.entryValues.append(tkinter.StringVar())
-            tkinter.Entry(scrollframe.interior,textvariable=self.entryValues[-1],width = 5,validate="key",validatecommand=vcmd).grid(row=i,column = 0, padx=(25,0))
+            tkinter.Entry(self.scrollFrame.interior,textvariable=self.entryValues[-1],width = 5,validate="key",validatecommand=vcmd).grid(row=i,column = 0, padx=(25,0))
             self.entryValues.append(tkinter.StringVar())
-            tkinter.Entry(scrollframe.interior, textvariable=self.entryValues[-1],width = 8).grid(row=i, column=1, padx=(60,0))
+            tkinter.Entry(self.scrollFrame.interior, textvariable=self.entryValues[-1],width = 8).grid(row=i, column=1, padx=(60,0))
             self.entryValues.append(tkinter.StringVar())
-            tkinter.Entry(scrollframe.interior, textvariable=self.entryValues[-1], width=5,validate="key",validatecommand=vcmd).grid(row=i, column=3,padx=(150,10))
-            tkinter.Label(scrollframe.interior, text=str(i + 1),bg="white").grid(row=i, column=2, padx=(70,10))
+            tkinter.Entry(self.scrollFrame.interior, textvariable=self.entryValues[-1], width=5,validate="key",validatecommand=vcmd).grid(row=i, column=3,padx=(150,10))
+            tkinter.Label(self.scrollFrame.interior, text=str(i + 1),bg="white").grid(row=i, column=2, padx=(70,10))
             self.entryValues.append(tkinter.IntVar())
-            tkinter.Radiobutton(scrollframe.interior,text = "In",variable=self.entryValues[-1],value=1,bg="white").grid(row=i,column = 4,padx=(50,0))
-            tkinter.Radiobutton(scrollframe.interior, text="Out", variable=self.entryValues[-1],value=2,bg="white").grid(row=i, column=5)
-            tkinter.Radiobutton(scrollframe.interior, text="both", variable=self.entryValues[-1],value=3,bg="white").grid(row=i, column=6,padx =(0,30))
+            tkinter.Radiobutton(self.scrollFrame.interior,text = "In",variable=self.entryValues[-1],value=1,bg="white").grid(row=i,column = 4,padx=(50,0))
+            tkinter.Radiobutton(self.scrollFrame.interior, text="Out", variable=self.entryValues[-1],value=2,bg="white").grid(row=i, column=5)
+            tkinter.Radiobutton(self.scrollFrame.interior, text="both", variable=self.entryValues[-1],value=3,bg="white").grid(row=i, column=6,padx =(0,30))
 
-        scrollframe.grid(row=1,column = 0,padx = 0,pady=0)
+            self.scrollFrame.grid(row=1,column = 0,padx = 0,pady=0)
         self.update()
-        print("size of scrollframe is", scrollframe.winfo_height())
+        print("size of scrollframe is", self.scrollFrame.winfo_height())
 
     def spawn_summary_window(self):
         ###
@@ -1688,11 +1785,12 @@ class mainWindow(tkinter.Tk):
             child.destroy()
         self.colourLabels = []
         self.summaryTree = None
-        self.img = ImageTk.PhotoImage(Image.open("folder-icon.jpg").resize((30,30),Image.ANTIALIAS))
+
+
         f = tkinter.font.nametofont("TkDefaultFont").configure(size=12)
         offset = self.winfo_screenwidth() - 820  ### the amount to offset the mainframe in the window so its centred
         offset /= 2
-        if self.winfo_screenheight() >800:
+        if self.winfo_screenheight() >900:
             width = 1000
             height = 800
             fontsize = 14
@@ -1709,7 +1807,14 @@ class mainWindow(tkinter.Tk):
         f = tkinter.font.Font(family='Helvetica', size=fontsize, weight=tkinter.font.BOLD)
         d = datetime.datetime.strftime(self.currentJob["surveydate"],"%d/%m/%y")
         tkinter.Label(frame, text=self.currentJob["jobno"] + " " + self.currentJob["jobname"]+ " " + d , bg="light grey",fg=self.tracsisBlue,font=f).grid(row=0, column=0,padx=(220,10),ipady=10)
-        tkinter.Button(frame, image=self.img, command=self.open_project_folder).grid(row=0, column=1)
+
+        f = tkinter.font.Font(family='Arial', size=fontsize)
+        try:
+            self.img = ImageTk.PhotoImage(Image.open("folder-icon.jpg").resize((30,30),Image.ANTIALIAS))
+            tkinter.Button(frame, image=self.img, command=self.open_project_folder).grid(row=0, column=1)
+        except Exception as e:
+            tkinter.Button(frame,text = "Open\nFolder", command=self.open_project_folder,font=f).grid(row=0, column=1)
+
         frame.grid(row=0, column=0,sticky="ew")
         f = tkinter.font.Font(family='Arial', size=fontsize)
         frame = tkinter.Frame(mainframe, bg="white",relief=tkinter.GROOVE,borderwidth=1,width=820)
@@ -1741,8 +1846,8 @@ class mainWindow(tkinter.Tk):
         tkinter.Label(frame, text="Matching", bg="white").grid(row=7, column=0,ipadx =30,columnspan = 10)
         tkinter.Button(frame, text="Open/Closed\nCordon", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("Directional")).grid(row=8, column=0,padx=20, pady=10)
         tkinter.Button(frame, text="Route\nAssignment", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("First Seen/Last Seen")).grid(row=8, column=1,padx=20, pady=10)
-        tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",fg=self.tracsisBlue,command = self.spawn_overtaking_setup_screen).grid(row=8, column=2, padx=20,pady=10)
-        tkinter.Button(frame, text="Filtered\nMatching", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("Filtered")).grid(row=8, column=3, padx=20,pady=10)
+        tkinter.Button(frame, text="Overtaking/\nPlatooning", width=17, height=3, bg="white",fg=self.tracsisBlue,command = self.spawn_overtaking_setup_screen).grid(row=8, column=3, padx=20,pady=10)
+        tkinter.Button(frame, text="Filtered\nMatching", width=17, height=3, bg="white",fg=self.tracsisBlue,command=lambda:self.spawn_matching_results_screen("Filtered")).grid(row=8, column=2, padx=20,pady=10)
         frame.grid(row=4, column=0,pady=5,sticky="ew")
         self.update()
         print("size of mainframe is",mainframe.winfo_height(),mainframe.winfo_reqheight())
@@ -1833,23 +1938,53 @@ class mainWindow(tkinter.Tk):
         tkinter.Button(win,text="Save",command=lambda: self.save_comment(txt,win)).grid(row=1,column=0)
 
     def spawn_settings_window(self):
-        f = tkinter.font.Font(family='Courier', size=9, weight='bold')
-        win = tkinter.Toplevel(self)
+        f = tkinter.font.Font(family='Helvetica', size=8)
+        win = tkinter.Toplevel(self,width = 200,height = 200,bg="white")
         win.wm_attributes("-topmost", 1)
         win.protocol("WM_DELETE_WINDOW", lambda: self.destroy__window(win))
-        tkinter.Label(win,text = "Please Enter Your Name",font = f).grid(row=0,column = 0,padx=10,pady=10)
-        e = tkinter.Entry(win,width = 20,font = f)
-        e.grid( row=0,column=1,padx=10,pady=10)
-        tkinter.Label(win,text="Please Select Database file",font = f).grid(row=1, column=0,padx=10,pady=10)
-        l = tkinter.Label(win,text="None",font = f,width = 40,wraplength=280,justify=tkinter.CENTER)
-        l.grid(row=1, column=1,padx=10,pady=10)
-        self.user,file = self.load_settings()
+        tkinter.Label(win,text = "Please Enter Your Name",font = f,bg="white").grid(row=0,column = 0,padx=10,pady=10)
+        e = tkinter.Entry(win,width = 16,font = f)
+        e.grid( row=0,column=1,padx=(0,10))
+        tkinter.Label(win,text="Please Select Database file",font = f,bg="white").grid(row=1, column=0,padx=10,pady=10)
+        txt = "None"
+        l = tkinter.Label(win,text="",font = f,width = 20,bg="white",justify=tkinter.LEFT)
+
+        self.user, file = self.load_settings()
         e.delete(0, tkinter.END)
         e.insert(0, self.user)
-        l.configure(text=file)
-        tkinter.Button(win,text = "Select",font = f,command=lambda:self.get_database_file_location(l)).grid(row=1,column=2,padx=10,pady=10)
-        tkinter.Button(win, text="Create", font=f, command=lambda: self.create_database(e,l,win)).grid(row=2, column=2,padx=10,pady=10)
-        tkinter.Button(win, text="Save", font=f,command=lambda:self.save_settings(e,l,win)).grid(row=3, column=2,padx=10,pady=10)
+        if file != "":
+            txt = self.Dbfile.split("/")[-1]
+
+        l.bind("<Button-3>", self.open_database_file_location)
+        l.bind("<Button-1>",self.get_database_file_location)
+        l.grid(row=1, column=1)
+        l.configure(text=txt)
+        tkinter.Button(win, text="Create", font=f, command=lambda: self.create_database(e,l,win)).grid(row=2, column=0,padx=10,pady=10)
+        tkinter.Button(win, text="Save", font=f,command=lambda:self.save_settings(e,l,win)).grid(row=2, column=1,padx=10,pady=10)
+
+    def get_database_file_location(self,event):
+        ###
+        ### prompt the user with a file navigation dialog, to select the location of the job database
+        ### display the selected location in a label in the settings window
+        ###
+
+        file = filedialog.askopenfilename()
+        if file == "" or ".sqlite" not in file:
+            messagebox.showinfo(message="You need to select a database file")
+            event.widget.configure(text="None")
+            return
+        self.Dbfile = file
+        myDB.set_file(file)
+        event.widget.configure(text=file.split("/")[-1])
+
+
+    def open_database_file_location(self,event):
+        dirName = os.path.dirname(self.Dbfile)
+        if os.path.isdir(dirName):
+            p = os.path.normpath(dirName)
+            subprocess.Popen('explorer "{0}"'.format(p))
+        else:
+            messagebox.showinfo(message="Database location doesnt exist")
 
     def create_database(self,e,l,win):
         fileName =myDB.create_Db()
@@ -1860,27 +1995,32 @@ class mainWindow(tkinter.Tk):
 
     def save_settings(self,e,l,win):
         name = e.get()
-        file = l.cget("text")
-        print("name is",name,"file is",file)
-        if (name == "") | (file == ""):
+        print("name is",name,"file is",self.Dbfile)
+        if (name == "") | (self.Dbfile == ""):
             messagebox.showinfo(message="You need to enter a name, and select a database location")
             return
-        if ".sqlite" not in file:
+        if ".sqlite" not in self.Dbfile:
             messagebox.showinfo(message="The selected database file must be a .sqlite file")
-            l.configure(text="")
+            l.configure(text="None")
+            self.Dbfile  = ""
             return
         dir = os.getcwd()
         print("dir is",dir)
         f = open("settings.txt","w")
         f.write(name + "\n")
-        f.write(file+ "\n")
+        f.write(self.Dbfile +  "\n")
         self.user = name
         self.destroy__window(win)
-        myDB.set_file(file)
+        myDB.set_file(self.Dbfile)
         self.spawn_survey_setup_screen()
 
     def load_settings(self):
-        f = open("settings.txt", "r")
+        try:
+            f = open("settings.txt", "r")
+        except FileNotFoundError as e:
+            f = open("settings.txt", "w")
+            f.close()
+            f = open("settings.txt", "r")
         try:
             name = f.readline().rstrip()
             file = f.readline().rstrip()
@@ -1891,17 +2031,6 @@ class mainWindow(tkinter.Tk):
         myDB.set_file(file)
         return([name,file])
 
-    def get_database_file_location(self,label):
-        ###
-        ### prompt the user with a file navigation dialog, to select the location of the job database
-        ### display the selected location in a label in the settings window
-        ###
-        file = filedialog.askopenfilename()
-        if file == "":
-            messagebox.showinfo(message="You need to select a database file")
-            label.configure(text="")
-            return
-        label.configure(text=file)
 
     def save_comment(self,txt,win):
         ###
@@ -2795,6 +2924,17 @@ class mainWindow(tkinter.Tk):
     def on_label_exit(self,event):
         event.widget.configure(fg=self.tracsisBlue)
 
+    def find_in_grid(self,frame, row, column):
+        if frame is None:
+            return
+        for children in frame.children.values():
+            info = children.grid_info()
+            print("info is",info)
+            # note that rows and column numbers are stored as string
+            if info['row'] == str(row) and info['column'] == str(column):
+                return children
+        return None
+
 def format_timedelta(td):
     minutes, seconds = divmod(td.seconds + td.days * 86400, 60)
     hours, minutes = divmod(minutes, 60)
@@ -2879,5 +3019,4 @@ class VerticalScrolledFrame(tkinter.Frame):
     def on_mousewheel(self,event):
         print("psdf")
         self.canvas.yview_scroll(-1 * int(event.delta / 120), "units")
-
 

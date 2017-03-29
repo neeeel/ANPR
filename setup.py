@@ -1,7 +1,8 @@
-from distutils.core import setup
-import py2exe.build_exe
+import sys
+from cx_Freeze import setup, Executable
 
-#setup(console=['test.py'], options={"py2exe":{"includes":["scipy.sparse.csgraph._validation","scipy.linalg.cython_blas","scipy.linalg.cython_lapack"]}})
-setup(data_files=[("tcl",['C:/Python34/tcl/tcl8.6/init.tcl'])],
-        console=[{"script":'test.py',"dest_base" : "ANPR v0.1",}],
-        options={"py2exe":{"includes":["scipy.sparse.csgraph._validation","scipy.linalg.cython_blas","scipy.linalg.cython_lapack","PIL","numpy","openpyxl"]}})
+setup(
+    name = "MatchPro",
+    version = "1.01",
+    description = "ANPR Matching Software",
+    executables = [Executable("test.py", base = "Win32GUI")])

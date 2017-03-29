@@ -845,16 +845,40 @@ def calculate_nondirectional_cordon(job):
         temp["outMovement"] = temp["newMovement"].shift(-1)
         temp["newMovement"] = temp["newMovement"].real.astype(int)
         temp["outMovement"] = temp["outMovement"].real.astype(int)
-        try:
-            temp.to_csv("non directional full data.csv", index=False)
-        except PermissionError as e:
-            pass
-            #messagebox.showinfo(
-                #message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
-        temp = temp[temp["matched"] == "Y"]
         dataframes.append(temp)
 
     temp = pd.concat(dataframes)
+    try:
+        temp.to_csv("dumped.csv")
+    except PermissionError as e:
+        print(e)
+
+    ###
+    ### get the unmatched plates
+    ###
+
+    mask = (temp["matched"] == "N") & (temp["matched"].shift(1) == "N")
+    print("unmatched plates")
+    unmatchedPlates = temp[mask]
+    unmatchedPlates.reset_index(inplace=True)
+    unmatchedPlates["Time"] = unmatchedPlates["Date"].apply(date_to_time)
+    unmatchedPlates = unmatchedPlates[["VRN", "Class", "Movement", "Time"]]
+    print(unmatchedPlates.head(30))
+    try:
+        unmatchedPlates.to_csv(outputFolder + "/Unmatched Plates.csv", header=["VRN", "Class", "Movement", "Time"],
+                               index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write Unmatched Plates to csv, file is already open. Run procedure again after closing csv file")
+
+    temp = temp[temp["matched"] == "Y"]
+
+
+
+
+
+
+
     temp = temp[temp["outMovement"] >= 0]
     temp["newMovement"].dropna(inplace=True)
     temp = temp[temp["matched"] == "Y"]
@@ -889,18 +913,29 @@ def calculate_nondirectional_cordon(job):
     ###
 
     counts = temp.groupby(["newMovement", "outMovement"]).size()
+    print("counts is",counts)
     aggs = temp.groupby(["newMovement", "outMovement"]).agg({"duration": [pd.DataFrame.max, pd.DataFrame.min,lambda x: sum(x, pd.Timedelta(0)) / len(x) if len(x) > 0 else 0]})
     aggs["duration", "max"] = aggs["duration"]["max"].apply(format_timedelta)
     aggs["duration", "min"] = aggs["duration"]["min"].apply(format_timedelta)
     aggs["duration", "<lambda>"] = aggs["duration"]["<lambda>"].apply(format_timedelta)
     result = [list(zip(counts.index.values, counts.values.tolist()))]
-
+    print("result is",result)
+    indexes = [item[0] for item in result[0]]
+    print("indexes are",indexes)
+    for i in inMov:
+        for j in outMov:
+            if (i,j) not in indexes:
+                print("couldnt find",(i,j),"in result")
     inDf = pd.DataFrame(index=inMov)
     outDf = pd.DataFrame(index=outMov)
     inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
-    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("before merge, intotals is")
+    print(inTotals)
+    #inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("after merge inTotals is")
+    print(inTotals)
     outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
-    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
     result.append(inTotals[0].values.tolist())
     result.append(outTotals[0].values.tolist())
 
@@ -918,6 +953,36 @@ def calculate_nondirectional_cordon(job):
     except PermissionError as e:
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
+    ###
+    ### build the momvent count dictionary
+    ###
+    result = temp.values.tolist()
+    movementCounts = {}  ### holds a dictionary counting the number of matched vehicles seen at each movement
+    for r in result:
+        #print("result blah", r)
+        for item in range(2, 5,
+                          2):  ### traverse along the journey, picking out every 2nd value , which is the movement number
+            movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
+            movementCounts[int(r[item])] += 1
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in
+             job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-") + job[
+                 "timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index in range(0, len(times) - 1, 2):
+        dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
+    tempDf = pd.concat(dataframes)
+    for key, value in movementCounts.items():
+        if len(temp[temp["newMovement"] == key]) != 0:
+            movementCounts[key] = "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))
+            movementCounts[key] = [len(tempDf[tempDf["newMovement"] == key]), value,
+                                   "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))]
+        else:
+            movementCounts[key] = [0, 0, 0]
+    job["movementCounts"] = movementCounts
+
 
     ###
     ### set up the results for display
@@ -951,15 +1016,17 @@ def calculate_cordon_in_out_only(job,checkboxes):
     outMov = []
     for site, details in job["sites"].items():
         for mvmtNo, mvmt in details.items():
-            if not int(mvmt["newmovement"]) in inMov:
+            if mvmt["dir"] == 1 or mvmt["dir"]==3:
                 inMov.append(int(mvmt["newmovement"]))
-            if not int(mvmt["newmovement"]) in outMov:
+            if mvmt["dir"] == 2 or mvmt["dir"] == 3:
                 outMov.append(int(mvmt["newmovement"]))
 
     ###
     ### set up some indexes so that if any sites have 0 values, we still pick up the sites in the dataframe
     ##
     inDf = pd.DataFrame(index=inMov)
+    print("idDf is ")
+    print(inDf)
     outDf = pd.DataFrame(index=outMov)
 
     ###
@@ -1014,6 +1081,22 @@ def calculate_cordon_in_out_only(job,checkboxes):
     except PermissionError as e:
         print(e)
 
+    ###
+    ### get the unmatched plates
+    ###
+
+    mask = (temp["matched"]=="N") & (temp["matched"].shift(1)=="N")
+    print("unmatched plates")
+    unmatchedPlates = temp[mask]
+    unmatchedPlates.reset_index(inplace=True)
+    unmatchedPlates["Time"] =unmatchedPlates["Date"].apply(date_to_time)
+    unmatchedPlates = unmatchedPlates[["VRN","Class","Movement","Time"]]
+    print(unmatchedPlates.head(30))
+    try:
+        unmatchedPlates.to_csv(outputFolder + "/Unmatched Plates.csv",header=["VRN","Class","Movement","Time"],index=False)
+    except PermissionError as e:
+        messagebox.showinfo(message="Couldnt write Unmatched Plates to csv, file is already open. Run procedure again after closing csv file")
+
     temp = temp[temp["matched"] == "Y"]
 
     del temp["Movement"]
@@ -1037,7 +1120,7 @@ def calculate_cordon_in_out_only(job,checkboxes):
             mins = int(splitTime[1])
             td = datetime.timedelta(hours=hours, minutes=mins, seconds=0)
             mask = (temp["newMovement"] == i) & (temp["outMovement"] == o) & (temp["duration"] <= td)
-            print("no of selections with mask is",len(temp[mask]))
+            #print("no of selections with mask is",len(temp[mask]))
             dataframes.append(temp[mask].copy())
         temp = pd.concat(dataframes)
     temp.sort_values(by=["VRN"], inplace=True, ascending=[True])
@@ -1047,12 +1130,21 @@ def calculate_cordon_in_out_only(job,checkboxes):
     aggs["duration", "min"] = aggs["duration"]["min"].apply(format_timedelta)
     aggs["duration", "<lambda>"] = aggs["duration"]["<lambda>"].apply(format_timedelta)
     inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
-    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("inTotals is")
+    print(inTotals)
+    #inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    print("after merge, inTotals is")
+    print(inTotals)
     outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
-    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
     resultsDict = {}
 
     result = list(zip(counts.index.values, counts.values.tolist()))
+
+
+
+
+
     for r in result:
         resultsDict[r[0]] = [r[1]]
     print(resultsDict)
@@ -1066,6 +1158,38 @@ def calculate_cordon_in_out_only(job,checkboxes):
     temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     temp = temp[["VRN","Class","newMovement","Date","outMovement","outTime","duration"]]
     temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
+
+    ###
+    ### build the momvent count dictionary
+    ###
+    result = temp.values.tolist()
+    movementCounts = {}  ### holds a dictionary counting the number of matched vehicles seen at each movement
+    for r in result:
+        #print("result blah", r)
+        for item in range(2, 5,
+                          2):  ### traverse along the journey, picking out every 2nd value , which is the movement number
+            movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
+            movementCounts[int(r[item])] += 1
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in
+             job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-") + job[
+                 "timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index in range(0, len(times) - 1, 2):
+        dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
+    tempDf = pd.concat(dataframes)
+    for key, value in movementCounts.items():
+        if len(temp[temp["newMovement"] == key]) != 0:
+            movementCounts[key] = "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))
+            movementCounts[key] = [len(tempDf[tempDf["newMovement"] == key]), value,
+                                   "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))]
+        else:
+            movementCounts[key]=0
+    job["movementCounts"] = movementCounts
+
+
+
     try:
         temp.to_csv(outputFolder + "/" + job["jobno"] +  " " + job["jobname"]  + " Cordon - in-out directional " + datetime.datetime.strftime(job["surveydate"], "%d-%m-%Y") + ".csv",header=["VRN","Class","In Movement","Time","Out Movement","Time","Duration"],index=False)
     except PermissionError as e:
@@ -1223,7 +1347,7 @@ def calculate_cordon_traversal_split_by_in_out(job,filters=None):
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
 
-def calculate_route_assignment_fs_ls(job,filters=None):
+def calculate_route_assignment_fs_ls(job,durationCheck,durationBehaviour,filters=None):
     global df,backgroundThread
     ###
     ### we simply want to document the very first time a vehicle was seen, and the very last time it was seen
@@ -1242,17 +1366,17 @@ def calculate_route_assignment_fs_ls(job,filters=None):
         print("thread is None")
     else:
         print(backgroundThread.is_alive())
-    if not os.path.isfile(dataFolder + "/complete routes data.pkl"):
-        if backgroundThread is None or not backgroundThread.is_alive():
-            print("starting up thread")
-            backgroundThread = threading.Thread(target=calculate_route_assignment_full_routes,args=(job,filters))
-            backgroundThread.start()
+
+    if backgroundThread is None or not backgroundThread.is_alive():
+        print("starting up thread")
+        backgroundThread = threading.Thread(target=calculate_route_assignment_full_routes,args=(job,filters,durationCheck,durationBehaviour))
+        backgroundThread.start()
     else:
-        print("already exists")
+        print("already running background thread")
 
     inMov = []
     outMov = []
-
+    unmatched = []
     fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
     fullDf = fullDf[fullDf["Class"].notnull()]
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
@@ -1269,9 +1393,10 @@ def calculate_route_assignment_fs_ls(job,filters=None):
         ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
         ###
         print("before removing singletons",len(temp))
+        singles = temp.groupby("VRN").filter(lambda x: len(x) == 1)
         temp = temp[temp.duplicated(subset=["VRN"], keep=False)]
         print("after removing",len(temp))
-
+        print("no of singles is ",len(singles))
         ###
         ### find first occurence of a plate. We dont care about direction
         ###
@@ -1294,8 +1419,29 @@ def calculate_route_assignment_fs_ls(job,filters=None):
         fullResult=fullResult.iloc[::2]
         print(fullResult.head())
         dataframes.append(fullResult)
-
+        unmatched.append(singles)
     temp = pd.concat(dataframes)
+
+    unmatchedPlates = pd.concat(unmatched)
+    unmatchedPlates.reset_index(inplace=True)
+    unmatchedPlates["Time"] = unmatchedPlates["Date"].apply(date_to_time)
+    unmatchedPlates = unmatchedPlates[["VRN", "Class", "Movement", "Time"]]
+    print(unmatchedPlates.head(30))
+    try:
+        unmatchedPlates.to_csv(outputFolder + "/Unmatched Plates.csv", header=["VRN", "Class", "Movement", "Time"],
+                               index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write Unmatched Plates to csv, file is already open. Run procedure again after closing csv file")
+    try:
+        temp.to_csv("dumped.csv")
+    except PermissionError as e:
+        print(e)
+
+
+
+
+
     temp["duration"] = temp["outTime"] - temp["Date"]
 
     counts = temp.groupby(["newMovement", "outMovement"]).size()
@@ -1317,9 +1463,9 @@ def calculate_route_assignment_fs_ls(job,filters=None):
     inDf = pd.DataFrame(index=inMov)
     outDf = pd.DataFrame(index=outMov)
     inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
-    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
     outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
-    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
 
     resultsDict = {}
     result = list(zip(counts.index.values, counts.values.tolist()))
@@ -1329,6 +1475,10 @@ def calculate_route_assignment_fs_ls(job,filters=None):
     for r in result:
         for val in r[1]:
             resultsDict[r[0]].append(val)
+
+
+
+
 
 
     temp["duration"] = temp["duration"].apply(format_timedelta)
@@ -1345,6 +1495,38 @@ def calculate_route_assignment_fs_ls(job,filters=None):
                     header=["VRN", "Class", "In Movement", "Time", "Out Movement", "Time", "Duration"],index=False)
     except PermissionError as e:
         messagebox.showinfo(message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
+
+    ###
+    ### build the momvent count dictionary
+    ###
+    result = temp.values.tolist()
+    print("for movementcounts, result is ", result)
+    movementCounts = {}  ### holds a dictionary counting the number of matched vehicles seen at each movement
+    for r in result:
+        #print("result blah", r)
+        for item in range(2, 5,
+                          2):  ### traverse along the journey, picking out every 2nd value , which is the movement number
+            movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
+            movementCounts[int(r[item])] += 1
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in
+             job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-") + job[
+                 "timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index in range(0, len(times) - 1, 2):
+        dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
+    tempDf = pd.concat(dataframes)
+    for key, value in movementCounts.items():
+        if len(temp[temp["newMovement"] == key]) != 0:
+            movementCounts[key] = "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))
+            movementCounts[key] = [len(tempDf[tempDf["newMovement"] == key]), value,
+                                   "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))]
+        else:
+            movementCounts[key] = [0, 0, 0]
+    job["movementCounts"] = movementCounts
+
+
 
     return [resultsDict, inTotals[0].values.tolist(), outTotals[0].values.tolist()]
 
@@ -1384,9 +1566,34 @@ def calculate_route_assignment_journey_pairs(job):
         dataframes.append(temp)
     temp = pd.concat(dataframes)
 
+    try:
+        temp.to_csv("dumped.csv")
+    except PermissionError as e:
+        print(e)
+
     ###
     ### we now have all journey pairs
     ###
+
+    ###
+    ### get the unmatched plates
+    ###
+
+    mask = (temp["matched"] == "N") & (temp["matched"].shift(1) == "N")
+    print("unmatched plates")
+    unmatchedPlates = temp[mask]
+    unmatchedPlates.reset_index(inplace=True)
+    unmatchedPlates["Time"] = unmatchedPlates["Date"].apply(date_to_time)
+    unmatchedPlates = unmatchedPlates[["VRN", "Class", "Movement", "Time"]]
+    print(unmatchedPlates.head(30))
+    try:
+        unmatchedPlates.to_csv(outputFolder + "/Unmatched Plates.csv", header=["VRN", "Class", "Movement", "Time"],
+                               index=False)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write Unmatched Plates to csv, file is already open. Run procedure again after closing csv file")
+
+
     temp = temp[temp["matched"] == "Y"]
     temp["duration"] = temp["outTime"] - temp["Date"]
 
@@ -1401,9 +1608,9 @@ def calculate_route_assignment_journey_pairs(job):
     inDf = pd.DataFrame(index=inMov) ### silly to name inDf similar to a name used earlier....
     outDf = pd.DataFrame(index=outMov)
     inTotals = pd.DataFrame(temp.groupby(["newMovement"]).size())
-    inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #inTotals = inDf.merge(inTotals, how="left", left_index=True, right_index=True).fillna(0)
     outTotals = pd.DataFrame(temp.groupby(["outMovement"]).size())
-    outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
+    #outTotals = outDf.merge(outTotals, how="left", left_index=True, right_index=True).fillna(0)
 
     resultsDict = {}
     result = list(zip(counts.index.values, counts.values.tolist()))
@@ -1430,10 +1637,38 @@ def calculate_route_assignment_journey_pairs(job):
     except PermissionError as e:
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
-    print("in totals are ",inTotals[0].values.tolist())
+
+    ###
+    ### build the momvent count dictionary
+    ###
+    result = temp.values.tolist()
+    print("for movementcounts, result is ", result)
+    movementCounts = {}  ### holds a dictionary counting the number of matched vehicles seen at each movement
+    for r in result:
+        #print("result blah", r)
+        for item in range(2, 5,2):  ### traverse along the journey, picking out every 2nd value , which is the movement number
+            movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
+            movementCounts[int(r[item])] += 1
+    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    fullDf = fullDf[fullDf["Class"].notnull()]
+    times = [x for x in
+             job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-") + job[
+                 "timeperiod4"].split("-") if x != ""]
+    dataframes = []
+    for index in range(0, len(times) - 1, 2):
+        dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
+    tempDf = pd.concat(dataframes)
+    for key, value in movementCounts.items():
+        if len(temp[temp["newMovement"] == key]) != 0:
+            movementCounts[key] = "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))
+            movementCounts[key] = [len(tempDf[tempDf["newMovement"] == key]), value,
+                                   "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))]
+        else:
+            movementCounts[key] = [0, 0, 0]
+    job["movementCounts"] = movementCounts
     return [resultsDict, inTotals[0].values.tolist(), outTotals[0].values.tolist()]
 
-def calculate_route_assignment_full_routes(job,filters):
+def calculate_route_assignment_full_routes(job,filters,durationCheck,durationBehaviour):
     ###
     ### each vehicle enters the cordon at a site, travels through a number of sites, and exits at a site
     ### we want to track and output the full journey taken by each vehicle, recording each movement it passed through
@@ -1467,7 +1702,6 @@ def calculate_route_assignment_full_routes(job,filters):
         temp.reset_index(inplace=True)
         temp = temp[temp["newMovement"] >= 0]
         temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
-        print(temp.head(20))
         ###
         ### if there are plates that only occur once in the data, we can remove them, as we know they cant be a match
         ###
@@ -1485,27 +1719,28 @@ def calculate_route_assignment_full_routes(job,filters):
         temp = temp.groupby(["VRN", "Class"]).agg({"newMovement": strJoin, "Date": dateJoin})
         temp.to_pickle(dataFolder + "/all journey pairs.pkl")
         temp.reset_index(inplace=True)
-
-        values = temp.values.tolist()
-
+        values = temp[["VRN","Class","newMovement","Date"]].values.tolist()
         for v in values:
             for i in range(2, 4):
                 v[i] = [item for item in v[i].split(",")]
             l = [item for sublist in list(zip(*[v[2], v[3]])) for item in sublist]
-            l.insert(0, l[-1])
-            l.insert(0, l[-2])
-            l.insert(0, l[3])
-            l.insert(0, l[3])
             l.insert(0, v[1])
             l.insert(0, v[0])
-            l.insert(6, "")
             result.append(l)
 
+    if durationCheck:
+        result = duration_check(job,result,durationBehaviour)
 
-        #dataframes.append(temp)
-    #temp = pd.concat(dataframes)
+    for journey in result:
+        journey.insert(2,"")
+        journey.insert(2,journey[-1])
+        journey.insert(2, journey[-2])
+        journey.insert(2, journey[6])
+        journey.insert(2, journey[6])
 
 
+
+    #print('result is',result)
 
     ###
     ### output the data to csv
@@ -1519,6 +1754,48 @@ def calculate_route_assignment_full_routes(job,filters):
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
     print("finished thread")
     backgroundThread = None
+
+def duration_check(job,journeys,durationBehaviour):
+    ###
+    ### journeys is a list of lists, each individual list is a journey in the form
+    ### [VRN,Class,mov1,time1,mov2,time2.....movN,timeN]
+    ### we check durations between each consecutive movement, to see if they exceed the entered durations
+    ###
+
+    if not job["durationsDictionary"] is None:
+        for journey in journeys:
+            try:
+                #print("checking journey",journey)
+                start = 2
+                while start < len(journey) - 2:
+                    # print("start is",start,len(journey) -1)
+                    duration = datetime.datetime.strptime(journey[start + 3], "%H:%M:%S") - datetime.datetime.strptime(
+                        journey[start + 1], "%H:%M:%S")
+                    # print("duration is",duration,(int(journey[start]),int(journey[start+2])),job["durationsDictionary"][(int(journey[start]),int(journey[start+2]))])
+                    v = job["durationsDictionary"][(int(journey[start]), int(journey[start + 2]))]
+                    splitTime = v.split(":")
+                    hours = int(splitTime[0])
+                    mins = int(splitTime[1])
+                    td = datetime.timedelta(hours=hours, minutes=mins, seconds=0)
+                    if duration > td:
+                        if durationBehaviour == 1:  ## split any journeys where a leg exceeds the duration
+                            newJourney = [journey[0], journey[1]]
+                            [newJourney.append(item) for item in journey[start + 2:]]
+                            while len(journey) > start + 2:
+                                del journey[-1]
+                            if len(newJourney) > 4:
+                                journeys.append(newJourney)
+                            if len(journey) < 5:
+                                while len(journey) > 0:
+                                    del journey[-1]
+                                    #print("journey is now",journey,"added journey",newJourney)
+                        else:  ### discard any journeys where a leg exceeds the duration
+                            while len(journey) > 0:
+                                del journey[-1]
+                    start += 2
+            except Exception as e:
+                print(journey,e)
+    return [item for item in journeys if item != []]
 
 def produce_full_routes(job):
     ###
@@ -1603,7 +1880,10 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
 
 
     result = []
+    unmatchedData = []
     for journey in journeys:
+        unmatchedJourneyData = journey.copy()
+        #print("unmatchedjorn is",unmatchedJourneyData,unmatchedJourneyData[1])
         data = journey[2]
         for f in filters:
             matches = anprregex.match(data,f)
@@ -1612,12 +1892,13 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
                 output.append(journey[0])
                 output.append(journey[1])
                 temp =([(item[1],item[0]) for item in m])
+                [unmatchedJourneyData[2].remove(item) for item in m]
                 temp = [item for sublist in temp for item in sublist]
                 [output.append(item) for item in temp]
                 if not output in result:
                     result.append(output)
-
-
+        [unmatchedData.append([journey[0],journey[1],item[1],item[0]])for item in unmatchedJourneyData[2]]
+        #print("unmatchedData is",unmatchedData)
     if durationCheck:
         if not job["durationsDictionary"] is None:
             for journey in result:
@@ -1656,7 +1937,7 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     ###
 
     for r in result:
-        print("result blah",r)
+        #print("result blah",r)
         for item in range(2,len(r),2): ### traverse along the journey, picking out every 2nd value , which is the movement number
             movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
             movementCounts[int(r[item])]+=1
@@ -1669,8 +1950,11 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
         dataframes.append(temp)
     temp=pd.concat(dataframes)
     for key,value in movementCounts.items():
-        movementCounts[key]= "{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))
-        movementCounts[key]= [len(temp[temp["newMovement"]==key]),value,"{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))]
+        if len(temp[temp["newMovement"]==key]) !=0:
+            movementCounts[key]= "{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))
+            movementCounts[key]= [len(temp[temp["newMovement"]==key]),value,"{0:.2f}".format(value*100/len(temp[temp["newMovement"]==key]))]
+        else:
+            movementCounts[key] = [0,0,0]
     job["movementCounts"] = movementCounts
 
     ###
@@ -1718,7 +2002,14 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
         messagebox.showinfo(
             message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
 
-
+    try:
+        with open(outputFolder + "/" + job["jobno"] + " " + job[
+            "jobname"] + " Filtered Matching - all Unmatched Plates " + datetime.datetime.strftime(job["surveydate"],"%d-%m-%Y") + ".csv","w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(unmatchedData)
+    except PermissionError as e:
+        messagebox.showinfo(
+            message="Couldnt write plates to csv, file is already open. Run procedure again after closing csv file")
 
     resultsDict ={}
     for r in result:
@@ -2185,8 +2476,12 @@ def test():
 
 
     myDB.set_file("C:/Users/NWatson/PycharmProjects/ANPR/blah.sqlite")
-    job = myDB.load_job("3105-IRE","Coldcut","07/10/16")
+    job = myDB.load_job("3206-MID","Dudley 3","2016-11-26")
+    print(job)
     load_job(job)
+
+    print(df[df["VRN"]=="A12JFO"])
+    exit()
     #produce_full_routes(job)
     calculate_regex_matching(job,["I-(B-O)"])
     exit()
@@ -2284,6 +2579,8 @@ def test():
 
 
 #test()
+
+#xit()
 
 win = mainwindow.mainWindow()
 win.setCallbackFunction("load unclassed",load_unclassed_plates)

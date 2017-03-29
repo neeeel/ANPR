@@ -74,7 +74,7 @@ class MatrixDisplay():
             colour = "white"
             for site, details in job["sites"].items():
                 for mvmtNo, mvmt in details.items():
-                    print("direction of movement", mvmtNo, "is", mvmt["dir"])
+                    #print("direction of movement", mvmtNo, "is", mvmt["dir"])
                     if mov == mvmtNo:
                         colour = mvmntColours[int(mvmt["dir"])]
             self.mainCanvas.create_line(x, y, x + ((noOfCols ) * self.columnWidth), y)
@@ -166,13 +166,16 @@ class MatrixDisplay():
             self.horizontalLabelsCanvas.xview_moveto(f)
             return "break"
 
-    def set_matrix_clicked_callback_function(self,fun):
+    def set_matrix_clicked_callback_function(self,fun,mainCanvasClickable=False):
         self.clicked_callback_function = fun
+        self.mainCanvasClickable = mainCanvasClickable
 
     def main_canvas_clicked(self, event):
         x, y = event.x, event.y
         print("clicked at", x, y)
         if self.clicked_callback_function is None:
+            return
+        if not self.mainCanvasClickable:
             return
         top, bottom = self.mainCanvas.yview()
         left, right = self.mainCanvas.xview()
@@ -188,7 +191,9 @@ class MatrixDisplay():
             print("outside matrix")
             return
         x, y = int((x + x_offset) / self.columnWidth) + 1, int((y + y_offset) / self.rowHeight) + 1
-        self.clicked_callback_function(y,x)
+        print("x,y is ",x,y)
+        print("labels are",self.verticalLabels[y-1],self.horizontalLabels[x-1])
+        self.clicked_callback_function(self.verticalLabels[y-1],self.horizontalLabels[x-1])
 
     def vertical_canvas_clicked(self,event):
         if not self.clickable:

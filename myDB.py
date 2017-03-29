@@ -477,7 +477,25 @@ def set_file(file):
     global databaseFile
     databaseFile = file
 
-
+def check_Db_file():
+    global databaseFile
+    try:
+        conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+        cur = conn.cursor()
+        #result = cur.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",("User",))
+        result = cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        result = [item[0] for item in result]
+        print(result)
+        if len(result) != 5:
+            cur.close()
+            return False
+        if result[0] == "Project"  and result[2] == "User" and result[3] == "Role" and result[4] == "workedOn":
+            cur.close()
+            return True
+        cur.close()
+        return False
+    except Exception as e:
+        return False
 
 databaseFile = ""
 #save_Job(data,file)

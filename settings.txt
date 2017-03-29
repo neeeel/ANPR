@@ -1,2 +1,2 @@
-neil watson
+Neil Watson
 C:/Users/NWatson/PycharmProjects/ANPR/blah.sqlite
