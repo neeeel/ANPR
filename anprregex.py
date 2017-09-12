@@ -100,29 +100,193 @@ def match3(data,regstring):
     return result
 
 def match2(data,regstring):
-    result = []
-    #print("data",data,"regstring",regstring)
-    matchstring = [d[1] for d in data]
-    matchstring = ",".join(matchstring)
-    match = re.finditer(regstring,matchstring)
-    result = []
-    #print(matchstring)
-    for m in match:
-        start = m.start()
-        s = m.group()
-        #print("matched",s)
-        if s[0] == ",":
-            start+=1
-        if s != "," and s != "":
-            if s[-1] == ",":
-                s = s[:-1]
-            if s[0] == ",":
-                s = s[1:]
-            if s != "":
-                length = len(s.split(","))
-                commas = matchstring[0:start].count(",")
-                result.append(data[commas:commas+length])
-    return result
+    first = False
+    last  = False
+    if "^" in regstring:
+        first = True
+        regstring = regstring.replace("^", "")
+    if "!" in regstring:
+        last = True
+        regstring = regstring.replace("!", "")
+    if "(" in regstring:
+        main = regstring.replace("(", "")
+        main = main.replace(")", "")
+        regex = main.split("-")
+        matches = verify2(data,regex)
+        if len(matches) > 0:
+            ###
+            ### we have matched the whole string, including the section outside the brackets,
+            ### we now need to return only the bracketed section
+            subMatches = []
+            for match in matches:
+                main = regstring.split("(")[1]
+                main = main.split(")")[0]
+                main = main.split("-")
+                subMatches += verify2(match,main)
+            matches = subMatches
+    else:
+        regex = regstring.split("-")
+        matches = verify2(data, regex, first=first)
+    if last:
+        tempMatches = []
+        for match in matches:
+            if match[-1] == data[-1]:
+                tempMatches.append(match)
+        matches = tempMatches
+    return matches
+
+
+
+def verify2(fullJourney,fullRegex,first=False):
+    ###
+    ### this function does the actual matching of the regstring against a journey
+    ### journey is a list of tuples, each tuple is (movementNo,time,direction)
+    ## eg ("7","07:50:16","I"). Each tuple represents the time and site at which a plate was seen
+    ###  in this verify, we are looking at the whole journey, and seeing if a subset of it matches the regex
+    ###
+    ### returns finish indexes of match
+    ### otherwise None
+    ###
+    ### Note: this functino is NOT recursive
+    ###
+    start = 0
+    i = 0
+    matches = []
+    while i <len(fullJourney):
+        #print("i is",i)
+        if first and i > 0:
+            return matches
+        start = i
+        regex = fullRegex
+        journey = fullJourney[i:]
+        finish = i
+        while len(regex) > 0:
+            #print("received", journey, regex, "length of journey is", len(journey),start,finish)
+            if len(journey)==0:
+                if (len(regex)==1 and "*" in regex[0]):
+                    matches.append(fullJourney[start:finish + 1])
+                    #print("found match from", start, "to", finish)
+                    i = finish + 1
+                    break
+                if len(regex)>1 and "*" in regex[0]:
+                    regex = regex[1:]
+                    continue
+                else:
+                    i += 1
+                    regex = ""
+                    break
+            zeroOrMoreFlag = False
+            notFlag = False
+            matched = False
+            anythingFlag = False
+            item = regex[0]
+            #print("item is",item)
+            if "*" in item:
+                zeroOrMoreFlag = True
+                item = item[:-1]
+            else:
+                zeroOrMoreFlag = False
+            if "¬" in item:
+                notFlag = True
+                item = item[1:]
+            else:
+                notFlag = False
+            if item == "A":
+                ###
+                ### if zeroOrMoreFlag is not true, we can just match to anything
+                if not zeroOrMoreFlag:
+                    matched = True
+                else:
+                    ###
+                    ### if it is true, we need to look at the next token, since we want to match anything
+                    ### except something that matches the next token
+                    ###
+                    if len(regex) == 1:
+                        ### if the A* is the last item in the regex, we just match everything
+                        matched = True
+                    else:
+                        ### otherwise, replace current token with the next token, set
+                        ### and set anythingFlag to true because we need to do different things on a match
+                        ###
+                        item = regex[1]
+                        item = item.replace("*","")
+                        anythingFlag = True
+            if item in ["I","B","O"]:
+                #print("checking",journey[0][2] , item)
+                if journey[0][2] == item:
+                    matched = True
+
+
+            try: #### is it numeric?
+                if int(item) !=0:
+                    if int(journey[0][1]) == int(item):
+                        matched = True
+            except ValueError as e:
+                pass ### regex value wasnt a number
+
+            if "|" in item: ### its a list of numbers(movements) OR'ed together
+                numlist = [int(num) for num in item.split("|")]
+                if int(journey[0][1]) in numlist:
+                    matched = True
+
+
+            if (matched != notFlag): ### same as XOR
+                #print("matched, zeroormoreflag is",zeroOrMoreFlag)
+                finish += 1
+                journey = journey[1:]
+                if anythingFlag:
+                    ### if anythingflag is true , that means that the current journey segment has matched the NEXT
+                    ### token in the regex, and the current token is A*
+                    ###
+                    if len(regex) == 2:
+                        ###
+                        ### if len(regex) is 2, then we have matched the current journey segment to the last item
+                        ### in the regex, so we can set this as a matched journey
+                        matches.append(fullJourney[start:finish])
+                        #print("0-found match from", start, "to", finish)
+                        i = finish
+                        break
+                    else:
+                        ###
+                        ### we have found the end of an A* sequence, but there are more things to match, so chop off
+                        ### the A* and the matched token, and continue on
+                        regex = regex[2:]
+                        continue
+                if len(regex)==1:
+                    ### we are on the last token
+                    if not zeroOrMoreFlag:
+                        ###
+                        ### we have matched the last token to something, add the match
+                        matches.append(fullJourney[start:finish])
+                        #print("1-found match from",start,"to",finish)
+                        i = finish
+                        break
+                else:
+                    if not zeroOrMoreFlag:
+                        ## only consume a token if its not a zero or more.
+                        regex =regex[1:]
+            else:
+                if zeroOrMoreFlag:
+                    if anythingFlag:
+                        ### if anythingFlag is true and we didnt match , that means we didnt match the
+                        ### NEXT regex token to the current journey segment, this means we can continue because we havent
+                        ### found an end point, and we are still matching A*, so move to next journey segment
+                        journey = journey[1:]
+                        finish+=1
+                        continue
+                    if len(regex) == 1:
+                        matches.append(fullJourney[start:finish ])
+                        #print("2-found match from", start, "to", finish,fullJourney[start:finish])
+                        i = finish
+                        break
+                    regex = regex[1:]
+                    continue
+                #print("failed , token didnt match direction")
+                ### reach here, and the match has failed
+                regex=""
+                i+=1
+                break
+    return matches
 
 def verify(journey,regex):
     ###
@@ -137,7 +301,7 @@ def verify(journey,regex):
     ### Note: this function is recursive
     ###
 
-    #print("received",journey,regex,"length of journey is",len(journey))
+    print("received",journey,regex,"length of journey is",len(journey))
     if len(journey)==0 and len(regex)==0:
         return True
     if len(journey)==0 and len(regex)!=0:
@@ -149,6 +313,7 @@ def verify(journey,regex):
     notFlag = False
     matched = False
     for item in regex:
+        print("item is",item)
         if "*" in item:
             zeroOrMoreFlag = True
             item = item[:-1]
@@ -160,7 +325,16 @@ def verify(journey,regex):
             #print("checking",journey[0][2] , item)
             if journey[0][2] == item:
                 matched = True
-
+        if item == "A":
+            ###
+            ### does the current regex minus the A match the rest of the journey?
+            if zeroOrMoreFlag:
+                if verify(journey,regex[1:]):
+                    return True
+            if verify(journey[1:],regex[1:]):
+                print("yes it does")
+                return True
+            matched = True
         try: #### is it numeric?
             if int(item) !=0:
                 if int(journey[0][1]) == int(item):
@@ -175,6 +349,7 @@ def verify(journey,regex):
 
 
         if matched:
+            #print("matched, zeroormoreflag is",zeroOrMoreFlag)
             if notFlag:
                 #print("failed due to not")
                 return False
@@ -182,6 +357,7 @@ def verify(journey,regex):
                 return True
             else:
                 if zeroOrMoreFlag:
+                    #print("retrying with",journey[1:],regex)
                     return verify(journey[1:], regex)
                 return verify(journey[1:],regex[1:])
         else:
@@ -254,27 +430,29 @@ def match(data,regstring):
                     matches.append(combi)
                 #print("-" * 100)
 
-    #print(matches)
+    print(matches)
     #return matches
     finalMatches = []
     for index, item in enumerate(matches):
-        #print(item)
+        print(item)
         for itemToCompare in matches[index:]:
-            #print("comparing", item, "with", itemToCompare)
+            print("comparing", item, "with", itemToCompare)
             result = sublistExists(itemToCompare, item)
+            print("sublist exists at ",result)
             if result != -1:
-                #print("replacing",item,itemToCompare)
+                print("replacing",item,itemToCompare)
                 matches[index + result] = itemToCompare
                 item = itemToCompare
 
     matches = list(reversed(matches))
     for index, item in enumerate(matches):
-        #print(item)
+        print(item)
         for itemToCompare in matches[index:]:
-            #print("comparing", item, "with", itemToCompare)
+            print("comparing", item, "with", itemToCompare)
             result = sublistExists(itemToCompare, item)
+
             if result != -1:
-                #print("replacing in second ", item, itemToCompare)
+                print("replacing in second ", item, itemToCompare)
                 matches[index + result] = itemToCompare
                 item = itemToCompare
 
@@ -282,3 +460,8 @@ def match(data,regstring):
     result = []
     [result.append(item) for item in matches if not item in result]
     return result
+
+#journey = [('17:40:25', '2', 'I'), ('17:46:31', '4', 'O'), ('17:52:48', '6', 'I'), ('17:55:08', '2', 'O'),('19:55:08', '4', 'O'),('19:55:08', '6', 'O')]
+#regstring = "2-A*-6!"
+#print(match(journey,"2-A*-4"))
+#print(match2(journey,regstring))

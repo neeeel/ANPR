@@ -1883,11 +1883,12 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
     unmatchedData = []
     for journey in journeys:
         unmatchedJourneyData = journey.copy()
-        #print("unmatchedjorn is",unmatchedJourneyData,unmatchedJourneyData[1])
+        #print("unmatchedjorn is",unmatchedJourneyData[:20])
         data = journey[2]
         for f in filters:
-            matches = anprregex.match(data,f)
+            matches = anprregex.match2(data,f)
             for m in matches:
+                #print("found match",m)
                 output = []
                 output.append(journey[0])
                 output.append(journey[1])

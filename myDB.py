@@ -388,7 +388,7 @@ def get_jobs():
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
     jobs = []
-    result = cur.execute('''SELECT * FROM job ''').fetchall()
+    result = cur.execute('''SELECT * FROM job ORDER BY createdDate DESC''').fetchall()
     if result is not None:
         for row in result:
             job= []
