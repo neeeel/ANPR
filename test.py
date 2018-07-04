@@ -289,13 +289,18 @@ def load_classes(job):
         tempdf.drop_duplicates(subset=["VRN"],inplace=True)
         tempdf = tempdf[["VRN","Class"]]
         tempdf.to_pickle(dataFolder + "/classes.pkl")
-        df.drop("Class", inplace=True)
+        if "Class" in df:
+            df.drop("Class", inplace=True,axis=1)
         df.reset_index(inplace=True)
         df = df.merge(tempdf, how="left",on="VRN")
         df.set_index(["Date"],inplace=True)
-        df.drop("Class_x", axis=1, inplace=True)
-        df.rename(columns={"Class_y": "Class"}, inplace=True)
-        # df = df[pd.notnull(df["Class"])]
+        print("_"*200)
+        print(df.head())
+        print(df.columns)
+        if "Class_x" in df:
+            df.drop("Class_x", axis=1, inplace=True)
+            df.rename(columns={"Class_y": "Class"}, inplace=True)
+            # df = df[pd.notnull(df["Class"])]
         df.to_pickle(dataFolder + "/classedData.pkl")
         df.to_csv("dumped.csv")
         myDB.update_job_with_progress(job["id"], "classed")
@@ -397,7 +402,9 @@ def load_job(job):
             mask = (df["VRN"].str.len() >= 4) & (df["VRN"].str.len() <= 8)
         df = df[mask]
     print("lenth of df after plate restrictions", len(df))
-
+    print(df.columns)
+    print(df[df["Class"].notnull()==True])
+    print(df.head())
 
     duplicates=[]
     for i in range(31):
@@ -1033,8 +1040,10 @@ def calculate_cordon_in_out_only(job,checkboxes):
     ### process the data according to directional in-out cordon
     ###
 
-    fullDf = df[datetime.datetime.strftime(job["surveydate"],"%Y-%m-%d")]
-    fullDf = fullDf[fullDf["Class"].notnull()]
+    #fullDf = df[datetime.datetime.strftime(job["surveydate"],"%Y-%m-%d")]
+    print("len df is",len(df))
+    fullDf = df[df["Class"].notnull()]
+    print("full df is",len(fullDf))
     times = [x for x in job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-")
              + job["timeperiod4"].split("-") if x != ""]
     dataframes = []
@@ -1042,12 +1051,28 @@ def calculate_cordon_in_out_only(job,checkboxes):
     print(fullDf.head())
     for index in range(0,len(times)-1,2):
         print("Processing times",times[index],times[index+1])
+        h1,m1 = times[index].split(":")
+        h2, m2 = times[index + 1].split(":")
+        h1 = int(h1)
+        m1 = int(m1)
+        h2 = int(h2)
+        m2= int(m2)
+        print("surveydate is",job["surveydate"],type(job["surveydate"]))
+        d = job["surveydate"]
+        start = datetime.datetime(day=d.day,month=d.month,year=d.year,hour=h1,minute=m1)
+        finish = datetime.datetime(day=d.day,month=d.month,year=d.year,hour=h2, minute=m2)
+        if h2 < h1 : ### time period crosses midnight
+            finish += datetime.timedelta(days=1)
+        print("time periods are",start,finish)
+        mask = (df.index >= start) & (df.index <= finish)
+        temp = fullDf[mask]
+        print("temp is",temp.head())
         temp = fullDf.between_time(times[index],times[index+1],include_end=False)
-
+        print("temp is now", temp.head())
         ###
         ###
         ###
-
+        temp = fullDf
         temp = temp[temp["newMovement"] >= 0]
 
         ###
@@ -1080,6 +1105,8 @@ def calculate_cordon_in_out_only(job,checkboxes):
         temp.to_csv("dumped.csv")
     except PermissionError as e:
         print(e)
+    print(temp.head(20))
+    print("no of plates in temp is",len(temp))
 
     ###
     ### get the unmatched plates
@@ -1088,8 +1115,9 @@ def calculate_cordon_in_out_only(job,checkboxes):
     mask = (temp["matched"]=="N") & (temp["matched"].shift(1)=="N")
     print("unmatched plates")
     unmatchedPlates = temp[mask]
+    print("no of unmatched plates is",len(unmatchedPlates))
     unmatchedPlates.reset_index(inplace=True)
-    unmatchedPlates["Time"] =unmatchedPlates["Date"].apply(date_to_time)
+    unmatchedPlates["Time"] =unmatchedPlates["Date"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     unmatchedPlates = unmatchedPlates[["VRN","Class","Movement","Time"]]
     print(unmatchedPlates.head(30))
     try:
@@ -1098,7 +1126,7 @@ def calculate_cordon_in_out_only(job,checkboxes):
         messagebox.showinfo(message="Couldnt write Unmatched Plates to csv, file is already open. Run procedure again after closing csv file")
 
     temp = temp[temp["matched"] == "Y"]
-
+    print("no of matched plates is",len(temp))
     del temp["Movement"]
     del temp["Duplicates"]
     del temp["Site"]
@@ -1123,6 +1151,7 @@ def calculate_cordon_in_out_only(job,checkboxes):
             #print("no of selections with mask is",len(temp[mask]))
             dataframes.append(temp[mask].copy())
         temp = pd.concat(dataframes)
+    print("after durations check, size is",len(temp))
     temp.sort_values(by=["VRN"], inplace=True, ascending=[True])
     counts = temp.groupby(["newMovement", "outMovement"]).size()
     aggs = temp.groupby(["newMovement", "outMovement"]).agg({"duration":[pd.DataFrame.max,pd.DataFrame.min,lambda x: sum(x,pd.Timedelta(0))/len(x) if len(x) > 0 else 0]})
@@ -1158,7 +1187,8 @@ def calculate_cordon_in_out_only(job,checkboxes):
     temp["outTime"] = temp["outTime"].apply(datetime.datetime.strftime, args=("%H:%M:%S",))
     temp = temp[["VRN","Class","newMovement","Date","outMovement","outTime","duration"]]
     temp.sort_values(by=["VRN","Date"], inplace=True, ascending=[True,True])
-
+    print("temp head")
+    print(temp.head())
     ###
     ### build the momvent count dictionary
     ###
@@ -1170,16 +1200,17 @@ def calculate_cordon_in_out_only(job,checkboxes):
                           2):  ### traverse along the journey, picking out every 2nd value , which is the movement number
             movementCounts[int(r[item])] = movementCounts.get(int(r[item]), 0)
             movementCounts[int(r[item])] += 1
-    fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
-    fullDf = fullDf[fullDf["Class"].notnull()]
+    #fullDf = df[datetime.datetime.strftime(job["surveydate"], "%Y-%m-%d")]
+    #fullDf = fullDf[fullDf["Class"].notnull()]
     times = [x for x in
              job["timeperiod1"].split("-") + job["timeperiod2"].split("-") + job["timeperiod3"].split("-") + job[
                  "timeperiod4"].split("-") if x != ""]
     dataframes = []
-    for index in range(0, len(times) - 1, 2):
-        dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
-    tempDf = pd.concat(dataframes)
+    #for index in range(0, len(times) - 1, 2):
+        #dataframes.append(fullDf.between_time(times[index], times[index + 1], include_end=False))
+    tempDf = fullDf
     for key, value in movementCounts.items():
+        print("checking",key,value,len(tempDf[tempDf["newMovement"] == key]))
         if len(temp[temp["newMovement"] == key]) != 0:
             movementCounts[key] = "{0:.2f}".format(value * 100 / len(tempDf[tempDf["newMovement"] == key]))
             movementCounts[key] = [len(tempDf[tempDf["newMovement"] == key]), value,
@@ -1881,25 +1912,59 @@ def calculate_regex_matching(job,filters,durationCheck,durationBehaviour):
 
     result = []
     unmatchedData = []
-    for journey in journeys:
-        unmatchedJourneyData = journey.copy()
-        #print("unmatchedjorn is",unmatchedJourneyData[:20])
-        data = journey[2]
-        for f in filters:
-            matches = anprregex.match2(data,f)
+    journeyList = journeys
+    #remainders = []
+    for f in filters:
+        remainders = []
+        for journey in journeyList:
+            # print("looking at ",journey)
+            data = list(journey[2])
+            matches, rem = anprregex.match2(data, f)
+            rem = [[journey[0], journey[1], r] for r in rem]
+            remainders += rem
+            if journey[0] == "AK58XKT":
+                print("found match", matches, rem, f)
+                # print("end of remainders is",remainders[-10:])
+
+            # print("rem is now",rem)
             for m in matches:
-                #print("found match",m)
                 output = []
                 output.append(journey[0])
                 output.append(journey[1])
-                temp =([(item[1],item[0]) for item in m])
-                [unmatchedJourneyData[2].remove(item) for item in m]
+                temp = ([(item[1], item[0]) for item in m])
+
                 temp = [item for sublist in temp for item in sublist]
                 [output.append(item) for item in temp]
+                if journey[0] == "AK58XKT":
+                    print("processing match", m)
+                    print("output", output)
                 if not output in result:
                     result.append(output)
-        [unmatchedData.append([journey[0],journey[1],item[1],item[0]])for item in unmatchedJourneyData[2]]
-        #print("unmatchedData is",unmatchedData)
+
+        journeyList = remainders
+
+
+    if False:
+        ### old code
+        for journey in journeys:
+            unmatchedJourneyData = journey.copy()
+            print("unmatchedjorn is",unmatchedJourneyData[:20])
+            data = journey[2]
+            for f in filters:
+                matches = anprregex.match2(data,f)
+                for m in matches:
+                    #print("found match",m)
+                    output = []
+                    output.append(journey[0])
+                    output.append(journey[1])
+                    temp =([(item[1],item[0]) for item in m])
+                    [unmatchedJourneyData[2].remove(item) for item in m]
+                    temp = [item for sublist in temp for item in sublist]
+                    [output.append(item) for item in temp]
+                    if not output in result:
+                        result.append(output)
+            [unmatchedData.append([journey[0],journey[1],item[1],item[0]])for item in unmatchedJourneyData[2]]
+            #print("unmatchedData is",unmatchedData)
     if durationCheck:
         if not job["durationsDictionary"] is None:
             for journey in result:

@@ -779,10 +779,11 @@ class mainWindow(tkinter.Tk):
             t = t.replace("¬", "")
             t = t.replace("(", "")
             t = t.replace(")", "")
+            print("testing",t)
             if t == "":
                 messagebox.showinfo(message="A token cannot only contain a special char(!,^,*,¬)")
                 return False
-            if t not in ["I","B","O"]:
+            if t not in ["I","B","O","A"]:
                 try:  #### is it numeric?
                     temp = int(t)
                 except ValueError as e:
@@ -1621,17 +1622,17 @@ class mainWindow(tkinter.Tk):
             messagebox.showinfo(message="Incorrect date format, project not saved")
             return
 
-        for i in range(3,11,2):
-            try:
-                d = datetime.datetime.strptime(self.entryValues[i].get(),"%H:%M")
-                d1 = datetime.datetime.strptime(self.entryValues[i+1].get(), "%H:%M")
-                if d >= d1:
-                    messagebox.showinfo(message="You have entered a pair of times where\n the start time is equal to or after the end time.\n no data saved")
-                    return False
+        #for i in range(3,11,2):
+            #try:
+                #d = datetime.datetime.strptime(self.entryValues[i].get(),"%H:%M")
+                #d1 = datetime.datetime.strptime(self.entryValues[i+1].get(), "%H:%M")
+                #if d >= d1:
+                    #messagebox.showinfo(message="You have entered a pair of times where\n the start time is equal to or after the end time.\n no data saved")
+                    #return False
                 ### TODO: verify end time is after start time, verify that if one is filled, the other is filled
-            except Exception as e:
-                self.entryValues[i].set("")
-                self.entryValues[i+1].set("")
+            #except Exception as e:
+                #self.entryValues[i].set("")
+                #self.entryValues[i+1].set("")
 
         if self.entryValues[3].get() == "" or self.entryValues[4].get() == "":
             messagebox.showinfo(message="You must enter at least one time period")
@@ -2836,12 +2837,11 @@ class mainWindow(tkinter.Tk):
         self.spawn_survey_setup_screen()
 
     def export_OVTemplate(self):
-        wb = openpyxl.load_workbook("OV template.xlsm", keep_vba=True)
+        wb = openpyxl.load_workbook("Overview template.xlsm", keep_vba=True)
         try:
-            sheet = wb.get_sheet_by_name("Temp")
+            sheet = wb.get_sheet_by_name("All Sites - 12Hr")
         except Exception as e:
-            messagebox.showinfo(message="Trying to export to excel, sheet Temp doesnt exist in the template file,cannot export")
-            return
+            return None
         classes = self.currentJob["classification"].split(",")
         classes = [x for i,x in enumerate(classes) if i % 2 == 0]
         for i,c in enumerate(classes):
@@ -2854,7 +2854,11 @@ class mainWindow(tkinter.Tk):
         col = 4
         for k,v in self.currentJob["sites"].items():
             row = 1
-            sheet.cell(row=row,column=col).value = int(k)
+            if k == "":
+                val = 0
+            else:
+                val = int(k)
+            sheet.cell(row=row,column=col).value = val
             for key,value in v.items():
                 row+=1
                 sheet.cell(row=row, column=col).value = int(key)
@@ -2868,6 +2872,7 @@ class mainWindow(tkinter.Tk):
         xl.Workbooks(1).Close(SaveChanges=1)
         xl.Application.Quit()
         myDB.update_job_with_progress(self.currentJob["id"], "OVTemplate")
+        print("finished")
 
     def load_unclassed_plates(self):
         self.loadUnclassedFunction(self.currentJob)

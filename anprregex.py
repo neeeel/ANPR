@@ -109,35 +109,42 @@ def match2(data,regstring):
         last = True
         regstring = regstring.replace("!", "")
     if "(" in regstring:
+        print(regstring.replace("-",""))
+        start = regstring.replace("-","").index("(")
+        end = regstring.replace("-","").index(")")
+        print("start",start,end)
         main = regstring.replace("(", "")
         main = main.replace(")", "")
         regex = main.split("-")
-        matches = verify2(data,regex)
-        if len(matches) > 0:
-            ###
-            ### we have matched the whole string, including the section outside the brackets,
-            ### we now need to return only the bracketed section
-            subMatches = []
-            for match in matches:
-                main = regstring.split("(")[1]
-                main = main.split(")")[0]
-                main = main.split("-")
-                subMatches += verify2(match,main)
-            matches = subMatches
+        matches = verify2(data,regex,first=first,last=last)
+        if last:
+            matches = [match for match in matches if match[-1] == data[-1]]
+        matches = [match[start:end-1] for match in matches]
     else:
         regex = regstring.split("-")
-        matches = verify2(data, regex, first=first)
-    if last:
-        tempMatches = []
-        for match in matches:
-            if match[-1] == data[-1]:
-                tempMatches.append(match)
-        matches = tempMatches
-    return matches
+        matches = verify2(data, regex, first=first,last=last)
+        if last:
+            matches = [match for match in matches if match[-1] == data[-1]]
+    matches = [m for m in matches if len(m) > 1]
+    remainders  = []
+    segmentStart = 0
+    start = 0
+    end = len(data)
+    #print("journey her is",data)
+    for start, end in [[data.index(m[0]), data.index(m[-1])] for m in matches]:
+        #print(segmentStart,start,end)
+        remainders.append(data[segmentStart:start])
+        segmentStart = end + 1
+    #print(segmentStart, start, end)
+    remainders.append(data[segmentStart:len(data)])
+    remainders = [r for r in remainders if len(r) > 1]
+    #print("remainders are", remainders)
+    #print("matches are", matches)
+    return [matches,remainders]
 
 
 
-def verify2(fullJourney,fullRegex,first=False):
+def verify2(fullJourney,fullRegex,first=False,last=False):
     ###
     ### this function does the actual matching of the regstring against a journey
     ### journey is a list of tuples, each tuple is (movementNo,time,direction)
@@ -147,13 +154,14 @@ def verify2(fullJourney,fullRegex,first=False):
     ### returns finish indexes of match
     ### otherwise None
     ###
-    ### Note: this functino is NOT recursive
+    ### Note: this function is NOT recursive
     ###
     start = 0
     i = 0
+
     matches = []
     while i <len(fullJourney):
-        #print("i is",i)
+       #print("fulljouorney is",fullJourney)
         if first and i > 0:
             return matches
         start = i
@@ -163,7 +171,7 @@ def verify2(fullJourney,fullRegex,first=False):
         while len(regex) > 0:
             #print("received", journey, regex, "length of journey is", len(journey),start,finish)
             if len(journey)==0:
-                if (len(regex)==1 and "*" in regex[0]):
+                if (len(regex)==1 and "*" in regex[0] and finish-start>1):
                     matches.append(fullJourney[start:finish + 1])
                     #print("found match from", start, "to", finish)
                     i = finish + 1
@@ -203,6 +211,7 @@ def verify2(fullJourney,fullRegex,first=False):
                     ###
                     if len(regex) == 1:
                         ### if the A* is the last item in the regex, we just match everything
+                        #print("a wibble",regex,journey)
                         matched = True
                     else:
                         ### otherwise, replace current token with the next token, set
@@ -275,7 +284,7 @@ def verify2(fullJourney,fullRegex,first=False):
                         finish+=1
                         continue
                     if len(regex) == 1:
-                        matches.append(fullJourney[start:finish ])
+                        matches.append(fullJourney[start:finish])
                         #print("2-found match from", start, "to", finish,fullJourney[start:finish])
                         i = finish
                         break
@@ -461,7 +470,25 @@ def match(data,regstring):
     [result.append(item) for item in matches if not item in result]
     return result
 
-#journey = [('17:40:25', '2', 'I'), ('17:46:31', '4', 'O'), ('17:52:48', '6', 'I'), ('17:55:08', '2', 'O'),('19:55:08', '4', 'O'),('19:55:08', '6', 'O')]
-#regstring = "2-A*-6!"
-#print(match(journey,"2-A*-4"))
-#print(match2(journey,regstring))
+def split_list(fullList,partial):
+    start = fullList.index(partial[0])
+    end = fullList.index(partial[-1])
+    p1 = list(fullList[:start])
+    p2 = list(fullList[end+1:])
+    return[p for p in [p1,p2] if len(p) > 1]
+
+
+
+#result = []
+journey = [('17:37:25', '3', 'B'),('17:40:25', '4', 'O'), ('17:46:31', '3', 'B'), ('17:52:48', '4', 'I'), ('18:46:31', '3', 'I'), ('18:52:48', '4', 'O')]
+filters = ["(B-O-B)-I","I-I"]
+for f in filters:
+    matches,rem = match2(journey, f)
+    print(matches,rem)
+#remainders = []
+#for f in filters:
+#    print("trying filter",f)
+#    matches,rem = match2(journey, f)
+#    print(matches)
+#    bbbb = [["a", "b"] + [item[1], item[0]] for m in matches for item in m]
+#print(bbbb)
