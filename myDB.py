@@ -81,109 +81,99 @@ def create_Db():
     #messagebox.askyesno(message="Do you want to set this new database as the working database?")
     return path+fileName
 
-def delete_job(jobNo,jobName,jobDate):
+
+def delete_project(projectID):
     global databaseFile
     conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
-    d = datetime.datetime.strptime(jobDate, "%d/%m/%y").date()
-    result = cur.execute(("SELECT * FROM job WHERE name =? and jobNo = ? and surveyDate = ?"),
-                         (jobName, jobNo, d)).fetchone()
+    result = cur.execute(("SELECT * FROM project WHERE id =  ?"),
+                         (projectID,)).fetchone()
     if result is None:
         return
     jobID = result[0]
     print("job id is",jobID)
-    sites = cur.execute('''SELECT * from Site where jobNo = ? ''', (jobID,)).fetchall()
     try:
-        for site in sites:
-            siteID = site[0]
-            print("looking at site",siteID)
-            cur.execute('''DELETE from movement where siteid = ? ''', (siteID,))
-        conn.commit()
-        cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
-        cur.execute('''DELETE from job where id = ? ''', (jobID,))
+        cur.execute('''DELETE from movement where jobID = ? ''', (jobID,)).fetchall()
+        cur.execute('''DELETE from project where id = ? ''', (jobID,))
         conn.commit()
     except sqlite3.OperationalError as e:
         messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
         return False
 
-def save_Job(data,user):
+
+def save_project(data):
+    print("din myDB data is,",data)
     global databaseFile
     conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
     conn.execute('pragma foreign_keys=ON')
     cur = conn.cursor()
     print("successfully opend db")
-    job = data["job"]
-    sites = data["sites"]
-    user= user.title()
-    print("user is",user)
+    job = data["project"]
+    movements = data["movements"]
+    uploadedData = None
+    jobID = None
     ###
     ### check job doesnt already exist
     ###
-    print("looking for",job["jobname"])
-    result = cur.execute('''SELECT  * from Job where name = ? and surveyDate = ?''',(job["jobname"],job["surveydate"]))
+    print("looking for",job)
+    result = cur.execute('''SELECT  * from project where projectNumber = ? and projectName = ? and projectDate = ?''',(job[0],job[1],job[2]))
     row = result.fetchone()
     if row is not None:
         if messagebox.askyesno(message="This job already exists, do you want to overwrite it?"):
             jobID = row[0]
             try:
-                for site in cur.execute('''SELECT * from Site where jobNo = ? ''',(jobID,)).fetchall():
-                    siteID = site[0]
-                    cur.execute('''DELETE from movement where siteid = ? ''',(siteID,))
-                cur.execute('''DELETE from site where jobno = ? ''', (jobID,))
-                cur.execute('''DELETE from job where id = ? ''', (jobID,))
-                job["folder"] = row[19]
+                cur.execute('''DELETE from movement where jobID = ? ''', (jobID,))
+                cur.execute('''DELETE from project where id = ? ''', (jobID,))
+                folder = row[26]
+                uploadedData = row[11]
             except sqlite3.OperationalError as e:
+                print("eror:",e)
                 messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
                 return False
         else:
             return False
     else:
-        dir = filedialog.askdirectory(title="Please select Project Location",initialdir="S:\\SCOTLAND DRIVE 2\\JOB FOLDERS\\")
-        if dir == "":
+        folder = filedialog.askdirectory(title="Please select Project Location",initialdir="S:\\SCOTLAND DRIVE 2\\JOB FOLDERS\\")
+        if folder == "":
             messagebox.showinfo(message="No Project Location selected, project not saved")
             return False
-        job["folder"] = dir
-    print("selected job folder is",job["folder"])
-    createdDate = datetime.datetime.today().date()
+
+    print("selected job folder is",folder)
+    job.append(folder)
+    job.append(uploadedData)
+    print("job is",job)
+    createdDate = datetime.datetime.today().strftime("%Y-%m-%d")
+    job.append(createdDate)
+    print("inserting",tuple(job))
+    print(len(job))
     try:
-        cur.execute("INSERT INTO job (name,jobNo,surveydate,timeperiod1,timeperiod2,timeperiod3,timeperiod4,noofcameras,interval,classification,folder,selectedDuplicates,createdDate,createdBy,plateRestriction) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (job["jobname"],job["jobno"],job["surveydate"],job["timeperiod1"]
-                                                    ,job["timeperiod2"],job["timeperiod3"],job["timeperiod4"]
-                                                    ,job["noOfCameras"],job["interval"],job["classification"],job["folder"],-1,createdDate,user,1))
+        cur.execute("INSERT INTO project (projectNumber,projectName,projectDate,numCameras,interval,start1,end1,"
+                    "from1,to1,split1,start2,end2,from2,to2,split2,start3,end3,from3,end3,split3,classes,beingProcessed,folder,uploadedData,addedDate) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",tuple(job)
+                    )
+        jobID = cur.lastrowid
     except sqlite3.OperationalError as e:
+        print(e)
         messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
         print(e)
         return False
     #result= cur.execute('''SELECT  ID from job where name = ? ''', (job["jobname"],))
-    jobID = cur.lastrowid
+
     print("inserted new job, id is ",jobID)
-    print("site data to be inserted is",sites)
-    for site in sites:
-        siteNo = site[0]
-        combined = int(site[1])
-        original=int(site[2])
-        dir = int(site[3])
-        cam = site[4]
-        result = cur.execute('''SELECT  * from Site where siteno = ?  AND jobNo = ?''', (siteNo,jobID))
-        row = result.fetchone()
-        if row is None:
-            print("didnt find site",siteNo," adding to database, site",siteNo)
+    print("site data to be inserted is",movements)
+    for mov in movements:
+        if mov[3] != "" and mov[4] != "":
+            siteNo = mov[0]
+            cam = mov[1]
+            old = int(mov[2])
+            new=int(mov[3])
+            dir = mov[4][0]
             try:
-                cur.execute("INSERT INTO Site (siteno,jobno) VALUES(?,?)",(siteNo,jobID))
-                siteID = cur.lastrowid ## primary key of site that we just inserted
-                cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",(siteID,combined,original,dir,cam))
-                print("inserting new movement for site",siteNo,"siteID",siteID)
+                cur.execute("INSERT INTO Movement(siteID,oldMov,newMov,dir,cameraNo,jobId) VALUES (?,?,?,?,?,?)",
+                        (siteNo, old, new, dir,cam,jobID))
             except sqlite3.OperationalError as e:
-                messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
-                return False
-        else:
-            siteID = row[0]  ### the primary key for a site, we need it to create a new movement record
-            print("We found site",row[1],"with id",siteID)
-            try:
-                cur.execute("INSERT INTO Movement(siteID,combinedMovementNum,originalMovementNum,dir,cameraNo) VALUES (?,?,?,?,?)",
-                        (siteID, combined, original, dir,cam))
-            except sqlite3.OperationalError as e:
+                print(e)
                 messagebox.showinfo(message="Database is locked, couldnt save project\n, please try again later.")
                 return False
             print("inserting new movement")
@@ -191,14 +181,128 @@ def save_Job(data,user):
         #conn.commit()
     conn.commit()
     try:
-        os.mkdir(job["folder"] + "/output")
+        os.mkdir(folder + "/output")
     except Exception as e:
         print(e,type(e))
     try:
-        os.mkdir(job["folder"] + "/data")
+        os.mkdir(folder + "/data")
     except Exception as e:
         print(e, type(e))
-    return job
+    return jobID
+
+
+def get_project_details(id):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute('''SELECT  projectNumber,projectName,strftime('%d/%m/%Y',projectDate),numCameras,interval,strftime('%d/%m/%Y',start1),strftime('%d/%m/%Y',end1),from1,to1,split1,
+                            strftime('%d/%m/%Y',start2),strftime('%d/%m/%Y',end2),from2,to2,split2,strftime('%d/%m/%Y',start3),strftime('%d/%m/%Y',end3),from3,to3,split3,classes from project where id = ? ''',(id,)).fetchone()
+    if result is not None:
+        result = [i if not i is None else "" for i in result]
+        return result
+    return None
+
+
+def get_folder(id):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute("SELECT folder from project where id = ?",(id,)).fetchone()
+    if not result is None:
+        return result[0]
+    return result
+
+
+def get_uploaded_file(id):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute("SELECT uploadedData from project where id = ?", (id,)).fetchone()
+    if not result is None:
+        return result[0]
+    return result
+
+
+def set_uploaded_file(id,file):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute("UPDATE project set  uploadedData = ?  where id = ?", (file,id)).fetchone()
+    conn.commit()
+
+
+def get_times(id):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute("SELECT start1,end1,from1,to1,split1,start2,end2,from2,to2,split2,start3,end3,from3,to3,split3 from project where id = ?", (id,)).fetchone()
+    if not result is None:
+        return result
+    return []
+
+
+def get_project_movements(id):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute('''SELECT siteId,cameraNo,oldMov,newMov,dir  from movement where jobid = ? ''',(id,)).fetchall()
+    #result = [i if not i is None else "" for i in result]
+    print("result is",result)
+    return result
+
+
+def get_project_list():
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    result = cur.execute("SELECT id,projectName,projectNumber,projectDate from project ORDER BY addedDate DESC").fetchall()
+    return result
+
+
+def get_classes(id):
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    result = cur.execute("SELECT classes from project where id = ?", (id,)).fetchone()
+    if not result is None:
+        return result[0].split(",")
+    return result
+
+
+def get_movements(jobId):
+    print("job id is", jobId, databaseFile)
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    inMov = cur.execute(
+        "SELECT newMov from movement "
+        "WHERE jobID = ? and dir = 'I'", (str(jobId),)).fetchall()
+    outMov = cur.execute(
+        "SELECT newMov from movement "
+        "WHERE jobID = ? and dir = 'O'", (str(jobId),)).fetchall()
+    allMov = cur.execute(
+        "SELECT newMov from movement "
+        "WHERE jobID = ?", (str(jobId),)).fetchall()
+    return [[i[0] for i in inMov], [i[0] for i in outMov], [i[0] for i in allMov]]
+
+##################################################################################################################
+#
+# below here is old code
+#
+#####################################################################################################################
 
 def load_job(jobNo,jobName,jobDate):
     global databaseFile
@@ -293,6 +397,10 @@ def load_job(jobNo,jobName,jobDate):
     #print("sites are",sites)
     job["sites"] = sites
     return job
+
+
+
+
 
 def update_duplicates(jobID,duplicates):
     global databaseFile

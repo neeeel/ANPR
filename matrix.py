@@ -1,13 +1,17 @@
 import tkinter
 import mainwindow
+import datetime
+from tkinter import messagebox
 
-class MatrixDisplay():
-    def __init__(self,parentFrame,maxWidth,maxHeight,clickable=False):
+class MatrixDisplay(tkinter.Frame):
+    def __init__(self,parentFrame,maxWidth,maxHeight,project,clickable=False,mainCanvasClickable=False):
         self.clickable = clickable
+        self.project = project
         self.clicked_callback_function = None
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
         self.parentFrame = parentFrame
+        self._entry_popup = None
         width = parentFrame.winfo_width()
         height = parentFrame.winfo_height()
         self.vbar = tkinter.Scrollbar(parentFrame, orient=tkinter.VERTICAL)
@@ -16,25 +20,60 @@ class MatrixDisplay():
         self.hbar.bind("<Button-1>", self.scroll_matrix_screen)
         self.mainCanvas = tkinter.Canvas(parentFrame, bg="mint cream", width=width, height=height, scrollregion=(0, 0, width, height))
         self.mainCanvas.bind("<Button-1>", self.main_canvas_clicked)
-
+        self.mainCanvasClickable = mainCanvasClickable
         self.verticalLabelsCanvas = tkinter.Canvas(parentFrame, bg="white", width=50, height=height, scrollregion=(0, 0, width, height),yscrollcommand=self.vbar.set)
         self.verticalLabelsCanvas.bind("<Button-1>",self.vertical_canvas_clicked)
         self.horizontalLabelsCanvas = tkinter.Canvas(parentFrame, bg="white", width=width, height=30, scrollregion=(0, 0, width, height),xscrollcommand=self.hbar.set)
         self.horizontalLabelsCanvas.bind("<Button-1>", self.horizontal_canvas_clicked)
         self.horizontalLabelsCanvas.grid(row=0, column=1, columnspan=1, sticky="w")
         self.verticalLabelsCanvas.grid(row=1, column=0, sticky="n")
+
         self.mainCanvas.grid(row=1, column=1, sticky="nw")
         self.vbar.grid(row=1, column=2, rowspan=1, sticky="NS")
         self.hbar.grid(row=2, column=1, columnspan=1, sticky="EW")
         self.vbar.grid_remove()
         self.hbar.grid_remove()
 
+
+    def mouse_over(self,event,canvas):
+        x, y = event.x, event.y
+        #print("clicked at", x, y)
+        # if self.clicked_callback_function is None:
+        # return
+        top, bottom = self.mainCanvas.yview()
+        left, right = self.mainCanvas.xview()
+        #print(left, right, top, bottom)
+        if canvas == "v":
+            noOfRows = len(self.verticalLabels)
+            y_offset = top * (self.rowHeight) * noOfRows
+            try:
+                mov = self.verticalLabels[int((y + y_offset) / self.rowHeight)]
+            except Exception as e:
+                return
+        else:
+            noOfCols = len(self.horizontalLabels)
+            x_offset = left * (self.columnWidth) * noOfCols
+            mov = int((x + x_offset) / self.columnWidth)
+            try:
+                mov = self.horizontalLabels[int((x + x_offset) / self.columnWidth)]
+            except Exception as e:
+                return
+
+        if self.clicked_callback_function is not None:
+            self.clicked_callback_function(mov)
+
+
+
     def clear(self):
         self.mainCanvas.delete(tkinter.ALL)
-        self.verticalLabelsCanvas.delete(tkinter.ALL)
-        self.horizontalLabelsCanvas.delete(tkinter.ALL)
+        #self.verticalLabelsCanvas.delete(tkinter.ALL)
+        #self.horizontalLabelsCanvas.delete(tkinter.ALL)
 
-    def draw(self,verticalLabels,horizontalLabels,data,job,fontsize=8):
+    def draw(self,data,index=0,fontsize=12):
+        verticalLabels = self.project.allMov
+        horizontalLabels = self.project.allMov
+        self.verticalLabelsCanvas.bind("<Motion>", lambda e: self.mouse_over(e, "v"))
+        self.horizontalLabelsCanvas.bind("<Motion>", lambda e: self.mouse_over(e, "h"))
         self.vbar.grid()
         self.hbar.grid()
         self.verticalLabels = verticalLabels
@@ -62,8 +101,6 @@ class MatrixDisplay():
         if displayHeight > canvasHeight + (self.rowHeight) + scrollBarWidth :
             displayHeight = canvasHeight + (self.rowHeight) + scrollBarWidth
 
-        print("setting display to ", displayWidth, displayHeight)
-        print("canvas settings are", canvasWidth, canvasHeight)
 
         mvmntColours = ["","sky blue","orange red","orange"]
 
@@ -72,15 +109,12 @@ class MatrixDisplay():
         ###
         for mov in verticalLabels:
             colour = "white"
-            for site, details in job["sites"].items():
-                for mvmtNo, mvmt in details.items():
-                    #print("direction of movement", mvmtNo, "is", mvmt["dir"])
-                    if mov == mvmtNo:
-                        colour = mvmntColours[int(mvmt["dir"])]
+            dir = self.project.get_direction(mov)
+            #print("dir of",mov,"is",dir)
+            colour = mvmntColours[["In","Out","Both"].index(dir) + 1]
             self.mainCanvas.create_line(x, y, x + ((noOfCols ) * self.columnWidth), y)
             self.verticalLabelsCanvas.create_rectangle(x, y, x + self.columnWidth, y + self.rowHeight, fill=colour)
             y = y + self.rowHeight / 2
-
             self.verticalLabelsCanvas.create_text(x + self.columnWidth / 2, y, text=mov, font=labelfont)
             y = y + self.rowHeight / 2
             self.mainCanvas.create_line(x, y, x + ((noOfCols) * self.columnWidth), y)
@@ -95,11 +129,8 @@ class MatrixDisplay():
         # y += rowHeight + 10
         for mov in horizontalLabels:
             colour = "white"
-            for site, details in job["sites"].items():
-                for mvmtNo, mvmt in details.items():
-                    #print("direction of movement", mvmtNo, "is", mvmt["dir"])
-                    if mov == mvmtNo:
-                        colour = mvmntColours[int(mvmt["dir"])]
+            dir = self.project.get_direction(mov)
+            colour = mvmntColours[["In", "Out", "Both"].index(dir) + 1]
             self.mainCanvas.create_line(x, y, x, y + ((noOfRows) * self.rowHeight))
             self.horizontalLabelsCanvas.create_rectangle(x, y, x + self.columnWidth, y + self.rowHeight, fill=colour)
             x = x + self.columnWidth / 2
@@ -115,9 +146,12 @@ class MatrixDisplay():
         totalFont = tkinter.font.Font(family="verdana", size=fontsize)
         x, y = 0, 0
         for key, data in data.items():
-            print(key,data)
+            #print(key,data)
             i, o = key
-            displayedValue = data
+            if type(data) == list:
+                displayedValue = data[index]
+            else:
+                displayedValue = data
             try:
                 row = verticalLabels.index(i) + 1
             except ValueError as e:
@@ -143,6 +177,7 @@ class MatrixDisplay():
         self.mainCanvas.configure(width=displayWidth - self.columnWidth - scrollBarWidth,height=displayHeight - self.rowHeight - scrollBarWidth,scrollregion=(0, 0, canvasWidth, canvasHeight))
         parent.configure(width=displayWidth, height=displayHeight)
 
+
     def scroll_matrix_screen(self, event):
         print(event)
         print(event.widget.cget("orient"), event.x, event.y)
@@ -166,15 +201,15 @@ class MatrixDisplay():
             self.horizontalLabelsCanvas.xview_moveto(f)
             return "break"
 
+
     def set_matrix_clicked_callback_function(self,fun,mainCanvasClickable=False):
         self.clicked_callback_function = fun
         self.mainCanvasClickable = mainCanvasClickable
 
+
     def main_canvas_clicked(self, event):
         x, y = event.x, event.y
         print("clicked at", x, y)
-        if self.clicked_callback_function is None:
-            return
         if not self.mainCanvasClickable:
             return
         top, bottom = self.mainCanvas.yview()
@@ -184,16 +219,50 @@ class MatrixDisplay():
         noOfRows = len(self.verticalLabels)
         x_offset = left * (self.columnWidth) * noOfCols
         y_offset = top * (self.rowHeight) * noOfRows
-        # print("offset are", x_offset, y_offset)
+        print("offset are", x_offset, y_offset)
         # x_offset, y_offset = x_offset - (10 + columnWidth), y_offset - (20 + rowHeight)
         # print("offset are", x_offset, y_offset)
         if x > noOfCols * self.columnWidth or y > noOfRows * self.rowHeight:
             print("outside matrix")
             return
-        x, y = int((x + x_offset) / self.columnWidth) + 1, int((y + y_offset) / self.rowHeight) + 1
+        x, y = int((x + x_offset) / self.columnWidth), int((y + y_offset) / self.rowHeight)
         print("x,y is ",x,y)
         print("labels are",self.verticalLabels[y-1],self.horizontalLabels[x-1])
-        self.clicked_callback_function(self.verticalLabels[y-1],self.horizontalLabels[x-1])
+        if self._entry_popup:
+            self._entry_popup.destroy()
+        self._entry_popup = tkinter.Entry(self.mainCanvas, exportselection=True, borderwidth=2,relief=tkinter.GROOVE)
+        self._entry_popup.place(x=x*(self.columnWidth) - x_offset + 3, y=y*(self.rowHeight) - y_offset + 3, width=self.columnWidth, height=self.rowHeight)
+        self._entry_popup.bind("<Escape>", lambda event: self.popup_destroy())
+        self._entry_popup.bind("<FocusOut>", lambda event: self.popup_destroy())
+        self._entry_popup.bind("<Return>", lambda event: self.edit_duration_value(x+1,y+1))
+        self._entry_popup.insert(0, "00:00")
+        self._entry_popup.focus_force()
+
+        #self.clicked_callback_function(self.verticalLabels[y-1],self.horizontalLabels[x-1])
+
+
+    def popup_destroy(self):
+        if self._entry_popup:
+            self._entry_popup.destroy()
+
+
+    def edit_duration_value(self,outMov,inMov):
+        print("editing",inMov,outMov)
+        val = self._entry_popup.get()
+        try:
+            datetime.datetime.strptime(val,"%H:%M")
+        except Exception as e:
+            messagebox.showinfo(message="Incorrect time format",parent=self.mainCanvas)
+            if self._entry_popup:
+                self._entry_popup.delete(0,"end")
+            return
+        print("current value is",self.project.durations[inMov,outMov])
+        self.project.durations[inMov,outMov] = val
+        print("new value is", self.project.durations[inMov,outMov])
+        self.project.save_durations()
+        self._entry_popup.destroy()
+        self.draw(self.project.get_durations())
+
 
     def vertical_canvas_clicked(self,event):
         if not self.clickable:
@@ -228,23 +297,11 @@ class MatrixDisplay():
         if self.clicked_callback_function is not None:
             self.clicked_callback_function(self.horizontalLabels[int((x + x_offset) / self.columnWidth)])
 
+
     def enable_click(self):
         self.clickable = True
 
+
     def disable_click(self):
         self.clickable = False
-#win = tkinter.Tk()
-data = {(1,2):100,(2,3):50,(4,6):10,(4,7):12,(4,8):22,(5,2):12,(1,3):45,("total",2):56,("total","total"):56}
-v = []
-h= []
-for i in range(20):
-    data[(i,i)] = 10
-    v.append(i)
-    h.append(i)
 
-#frame = tkinter.Frame(win,width = 800,height=800)
-#frame.grid(row=0,column=0)
-#frame.grid_propagate(False)
-#matrix = MatrixDisplay(frame,800,800)
-#matrix.draw(v,h,data)
-#win.mainloop()

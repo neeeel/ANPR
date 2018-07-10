@@ -109,10 +109,10 @@ def match2(data,regstring):
         last = True
         regstring = regstring.replace("!", "")
     if "(" in regstring:
-        print(regstring.replace("-",""))
+        #print(regstring.replace("-",""))
         start = regstring.replace("-","").index("(")
         end = regstring.replace("-","").index(")")
-        print("start",start,end)
+        #print("start",start,end)
         main = regstring.replace("(", "")
         main = main.replace(")", "")
         regex = main.split("-")
