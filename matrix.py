@@ -66,12 +66,16 @@ class MatrixDisplay(tkinter.Frame):
 
     def clear(self):
         self.mainCanvas.delete(tkinter.ALL)
+        self.mainCanvas.update()
         #self.verticalLabelsCanvas.delete(tkinter.ALL)
         #self.horizontalLabelsCanvas.delete(tkinter.ALL)
 
-    def draw(self,data,index=0,fontsize=12):
-        verticalLabels = self.project.allMov
-        horizontalLabels = self.project.allMov
+    def draw(self,data,index=0,fontsize=10,totals=False):
+        verticalLabels = list(self.project.allMov)
+        horizontalLabels = list(self.project.allMov)
+        if totals:
+            verticalLabels.append("Total")
+            horizontalLabels.append("Total")
         self.verticalLabelsCanvas.bind("<Motion>", lambda e: self.mouse_over(e, "v"))
         self.horizontalLabelsCanvas.bind("<Motion>", lambda e: self.mouse_over(e, "h"))
         self.vbar.grid()
@@ -164,9 +168,9 @@ class MatrixDisplay(tkinter.Frame):
                 continue
             if key[0] != "total" and key[1] != "total":
                 self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont)
-            if key[0] == "total" or key[1]=="total":
+            if key[0] == "Total" or key[1]=="Total":
                 self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont,fill="light blue")
-            if key[0] == "total" and key[1]=="total":
+            if key[0] == "Total" and key[1]=="Total":
                 self.mainCanvas.create_text((x + (self.columnWidth * column) - self.columnWidth / 2),(y + (self.rowHeight * row) - self.rowHeight / 2), text=displayedValue,font=dataFont,fill = "dark blue")
 
 
@@ -181,7 +185,7 @@ class MatrixDisplay(tkinter.Frame):
     def scroll_matrix_screen(self, event):
         print(event)
         print(event.widget.cget("orient"), event.x, event.y)
-
+        self.popup_destroy()
         if event.widget.cget("orient") == "vertical":
             top, bottom = (event.widget.get())
             thumbsize = bottom - top
@@ -244,6 +248,7 @@ class MatrixDisplay(tkinter.Frame):
     def popup_destroy(self):
         if self._entry_popup:
             self._entry_popup.destroy()
+        self._entry_popup = None
 
 
     def edit_duration_value(self,outMov,inMov):

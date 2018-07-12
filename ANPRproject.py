@@ -8,6 +8,8 @@ import numpy as np
 import anprregex
 import pyexcelerate
 import openpyxl
+from tkinter import messagebox
+import copy
 
 class ANPRproject():
 
@@ -28,6 +30,7 @@ class ANPRproject():
         self.jobDetails = myDB.get_project_details(iid)
         self.inMov,self.outMov,self.allMov = myDB.get_movements(iid)
         self.folder = myDB.get_folder(iid)
+
         if not os.path.exists(os.path.join(self.folder,"output")):
             os.mkdir(os.path.join(self.folder,"output"))
         if not os.path.exists(os.path.join(self.folder,"data")):
@@ -35,20 +38,32 @@ class ANPRproject():
         self.load_durations()
         self.times = self.set_up_times()
         print("times are", self.times)
-        self.load_plates()
+        #self.load_plates()
 
 
     def load_durations(self,val="12:00"):
-        if not os.path.exists(os.path.join(self.folder,"durations.pkl")):
+        if not os.path.exists(os.path.join(self.folder,"data","durations.pkl")):
             self.durations = {}
             for m in self.allMov:
                 for m2 in self.allMov:
                     self.durations[m,m2] = val
             self.save_durations()
         else:
-            with open(os.path.join(self.folder,"durations.pkl"),"rb") as f:
+            with open(os.path.join(self.folder,"data","durations.pkl"),"rb") as f:
                 self.durations = pickle.load(f)
         print("no of durations loaded", len(self.durations))
+
+
+    def clear_data_folder(self):
+        if os.path.exists(os.path.join(self.folder, "data", "data.pkl")):
+            os.remove(os.path.join(self.folder, "data", "data.pkl"))
+        if os.path.exists(os.path.join(self.folder, "data", "all journeys as list.pkl")):
+            os.remove(os.path.join(self.folder, "data", "all journeys as list.pkl"))
+        if os.path.exists(os.path.join(self.folder, "data", "durations.pkl")):
+            os.remove(os.path.join(self.folder, "data", "durations.pkl"))
+        if os.path.exists(os.path.join(self.folder, "data", "last run.pkl")):
+            os.remove(os.path.join(self.folder, "data", "last run.pkl"))
+
 
 
     def get_durations(self):
@@ -56,7 +71,7 @@ class ANPRproject():
 
 
     def save_durations(self):
-        with open(os.path.join(self.folder,"durations.pkl"), "wb") as f:
+        with open(os.path.join(self.folder,"data","durations.pkl"), "wb") as f:
             pickle.dump(self.durations, f)
 
 
@@ -99,50 +114,48 @@ class ANPRproject():
 
     def load_plates(self):
         self.data = None
-        print(".looking for", os.path.join(self.folder, "data.pkl"))
-        if not os.path.exists(os.path.join(self.folder, "data.pkl")):
+        print(".looking for", os.path.join(self.folder,"data", "data.pkl"))
+        if not os.path.exists(os.path.join(self.folder,"data", "data.pkl")):
             print("couldnt find data file")
             uploadedFile = myDB.get_uploaded_file(self.projectId)
             if not uploadedFile is None and os.path.exists(uploadedFile):
                 print("converting plates")
                 #self.project.beingProcessed = True
                 #self.project.save()
-                self.convert_excel_plates()
+                if not self.convert_excel_plates():
+                    return False
                 #self.project.beingProcessed = False
                 #self.project.save()
                 # self.create_full_journeys()
             else:
                 print("no plates loaded")
+                return False
 
         try:
-            self.data = pd.read_pickle(os.path.join(self.folder, "data.pkl"))
-            print(self.data.info(memory_usage="deep"))
-            self.data["oldMovement"] = self.data["oldMovement"].astype("uint8")
-            self.data["movement"].fillna(0, inplace=True)
-            self.data["movement"] = self.data["movement"].astype(int)
-            self.data["movement"] = self.data["movement"].astype("uint8")
-
-            self.data["Class"] = self.data["Class"].astype("category")
-
-            cat_type = CategoricalDtype(categories=["I", "O", "B"], ordered=True)
-            self.data["direction"] = self.data["direction"].astype(cat_type)
-
-            cat_type = CategoricalDtype(categories=["Y", "N"], ordered=True)
-            self.data["Duplicates"] = self.data["Duplicates"].astype(cat_type)
-            print(self.data.info(memory_usage="deep"))
+            self.data = pd.read_pickle(os.path.join(self.folder,"data", "data.pkl"))
+            dups = len(self.data[self.data.duplicated(keep=False)])
+            print("dups")
+            print(self.data[self.data.duplicated(keep=False)])
+            if dups > 0:
+                answer = messagebox.askyesno(
+                    message="There are " + str(dups) + " duplicate plates , do you want to continue anyway?")
+                if not answer:
+                    return False
+            print("no of plates loaded,",len(self.data))
 
         except Exception as e:
             print(e)
-            return
+            return False
+        return True
 
 
     def convert_excel_plates(self):
         uploadedFile = myDB.get_uploaded_file(self.projectId)
         if not os.path.exists(uploadedFile):
-            return
+            return False
         ext = uploadedFile[uploadedFile.rfind("."):]
         if ext not in (".xlsx", ".csv", ".xlsm", ".xls"):
-            return
+            return False
         try:
             if ".csv" in uploadedFile:
                 df = pd.read_csv(uploadedFile)
@@ -162,6 +175,7 @@ class ANPRproject():
                     df.loc[df["oldMovement"] == mov[2], "direction"] = mov[4]
                     df.loc[df["oldMovement"] == mov[2], "movement"] = mov[3]
             print("finished new method")
+
             df.drop(["Time"], inplace=True, axis=1)
             df["Duplicates"] = "N"
             df.sort_values(by=["VRN", "movement"], inplace=True, ascending=[True, True])
@@ -193,12 +207,13 @@ class ANPRproject():
             ### TODO do something when the reading of plates failed
             print(e)
             self.data = None
-            return
+            return False
         self.save_plates()
+        return True
 
 
     def save_plates(self):
-        self.data.to_pickle(os.path.join(self.folder, "data.pkl"))
+        self.data.to_pickle(os.path.join(self.folder,"data", "data.pkl"))
 
 
     def create_full_journeys(self):
@@ -209,53 +224,53 @@ class ANPRproject():
         print(df.info())
         df = df[df["Class"].notnull()]
         print("*"*100)
-        print(df.head())
+        print("creating full hjourneys")
         print("*" * 100)
         #print(df[df["VRN"] == "111MJT"])
         for t in self.times:#
             print(t[0],t[1])
             mask = (df.index >= t[0]) & (df.index <= t[1])
             temp = df[mask]
-            print("temp is",temp.head())
-            temp.index.name = "Date"
-            temp.reset_index(inplace=True)
-            print("before removing 0s,size is",len(temp))
-            temp = temp[temp["movement"] > 0]
-            print("after removing 0s,size is", len(temp))
-            temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
-            #temp = temp[temp.duplicated(subset=["VRN"], keep=False)] ### remove singletons
-            #print("temp",temp.head())
-            if temp is None or len(temp) == 0:
-                return
-            strJoin = lambda x: ",".join(x.astype(str))
-            dateJoin = lambda x: ",".join(x.apply(date_to_time))
-            temp = temp.groupby(["VRN", "Class"]).agg({"movement": strJoin, "Date": dateJoin,"direction":strJoin})
-            temp.reset_index(inplace=True)
-            temp = temp[["VRN", "Class", "Date", "movement", "direction"]]
-            #temp.to_csv("wibble.csv")
-            values = temp.values.tolist()
-            print("created journeys",values[:2])
-            #flat_list = []
-            f = open("test list.txt","w")
-            for v in values:
-                r = [v[0], v[1], list(zip(*[item.split(",") for item in v[2:]]))]
-                #flat_list = [v[0], v[1]] + [item for sublist in r for item in sublist]
-                f.write(",".join(v) + "\n")
-                result.append(r)
-                if v[0] == "111MJT":
-                    print("wibble",v,result[-1])
-            f.close()
+            if len(temp) > 0:
+                temp.index.name = "Date"
+                temp.reset_index(inplace=True)
+                temp = temp[temp["movement"] > 0]
+                temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
+                strJoin = lambda x: ",".join(x.astype(str))
+                dateJoin = lambda x: ",".join(x.apply(date_to_time))
+                temp = temp.groupby(["VRN", "Class"]).agg({"movement": strJoin, "Date": dateJoin,"direction":strJoin})
+                temp.reset_index(inplace=True)
+                temp = temp[["VRN", "Class", "Date", "movement", "direction"]]
+                #temp.to_csv("wibble.csv")
+                values = temp.values.tolist()
+                print("created journeys",values[:2])
+                #flat_list = []
+                f = open("test list.txt","w")
+                for v in values:
+                    #print("v is",v)
+                    r = [v[0], v[1], list(zip(*[item.split(",") for item in v[2:]]))]
+                    #print("r is",r)
+                    r[2] = [list(item) for item in r[2]]
+                    for item in r[2]:
+                        #print("converting item",item)
+                        for i in range(0,len(item),3):
+                            item[i] = datetime.datetime.strptime(item[i],"%d/%m/%Y %H:%M:%S")
+                    f.write(",".join(v) + "\n")
+                    result.append(r)
+                    if v[0] == "111MJT":
+                        print("wibble",v,result[-1])
+                f.close()
         print("all journeys is",result[:5])
-        with open(os.path.join(self.folder,"all journeys as list.pkl"), "wb") as f:
+        with open(os.path.join(self.folder,"data","all journeys as list.pkl"), "wb") as f:
             for r in result:
                 pickle.dump(r, f)
         #self.allJourneys = result
 
 
     def calculate_regex_matching(self, filters, durationCheck, durationBehaviour,durationMaxValue):
-        if os.path.exists(os.path.join(self.folder, "last run.pkl")):
-            os.remove(os.path.join(self.folder, "last run.pkl"))
-        if not os.path.join(self.folder,"all journeys as list.pkl"):
+        if os.path.exists(os.path.join(self.folder,"data", "last run.pkl")):
+            os.remove(os.path.join(self.folder,"data", "last run.pkl"))
+        if not os.path.join(self.folder,"data","all journeys as list.pkl"):
             return self.get_matched_counts([], [])
         allPlates = []# [[journey[0], journey[1],journey[2][i][1],journey[2][i][0]] for journey in self.allJourneys for i in
                          #range(len(journey[2]))]
@@ -265,7 +280,7 @@ class ANPRproject():
         print("filters",filters)
         if filters == []:
             return self.get_matched_counts([],[])
-        for journey in read_from_pickle(os.path.join(self.folder,"all journeys as list.pkl")):
+        for journey in read_from_pickle(os.path.join(self.folder,"data","all journeys as list.pkl")):
             #print("journey is",journey)
             #print("appending",[[journey[0], journey[1],journey[2][i][1],journey[2][i][0]]  for i in
                          #range(len(journey[2]))])
@@ -308,12 +323,11 @@ class ANPRproject():
         allPlates["movement"] = allPlates["movement"].astype(int, errors="ignore")
         result = self.check_durations(result, durationCheck, durationBehaviour,durationMaxValue)
         #print("after durations check, first journey is", result[0])
-        with open(os.path.join(self.folder,"last run.pkl"), "wb") as f:
+        with open(os.path.join(self.folder,"data","last run.pkl"), "wb") as f:
             pickle.dump({"result":result,"allPlates":allPlates,"name":"Filtered Matching"}, f)
         #self.save_matched_data(result,allPlates,"Filtered Matching",timeType)
         #print("after saving check, first journey is", result[0])
         return self.get_matched_counts(result,allPlates)
-
 
 
     def calculate_nondirectional_cordon(self, durationCheck, durationBehaviour,durationMaxValue):
@@ -321,17 +335,20 @@ class ANPRproject():
         ### we want to "pair off" appearances of a vehicle. So if there are 4 appearances of a vehicle, we pair them off as
         ### (1,2) and (3,4). Unlike directional, we dont care about whether the first is an in and the second is an out
         ###
-        if os.path.exists(os.path.join(self.folder, "last run.pkl")):
-            os.remove(os.path.join(self.folder, "last run.pkl"))
+        if os.path.exists(os.path.join(self.folder,"data", "last run.pkl")):
+            os.remove(os.path.join(self.folder,"data", "last run.pkl"))
         if self.data is None:
             return self.get_matched_counts([], [])
         journeys = []
         allPlates = []
         df = self.data#[self.project.projectDate.strftime("%Y-%m-%d")]
+        print("before removing null classes",len(df))
         df = df[df["Class"].notnull()]
+        print("after removing null classes", len(df))
         for t in self.times:
             mask = (df.index >= t[0]) & (df.index <= t[1])
             temp = df[mask]
+            print("no of selected vrns",len(temp))
             temp.index.name = "Date"
             temp.reset_index(inplace=True)
             temp = temp[temp["movement"] > 0]
@@ -375,19 +392,20 @@ class ANPRproject():
             ###
             temp = temp[temp["matched"] == "Y"]
             temp["movement"].dropna(inplace=True)
-            #print("selected")
-            #print(selected.head())
+            print("at end of process, temp is",len(temp))
             journeys.append(temp)
         journeys = pd.concat(journeys)
+        print("after concatenation, journets is",len(journeys))
         print(journeys.head())
-        journeys["Date"] = journeys["Date"].apply(date_to_time)
-        journeys["outTime"] = journeys["outTime"].apply(date_to_time)
+        #journeys["Date"] = journeys["Date"].apply(date_to_time)
+        #journeys["outTime"] = journeys["outTime"].apply(date_to_time)
         print("journeys")
         print(journeys.head())
         journeys = journeys[["VRN", "Class", "movement", "Date", "outMovement", "outTime"]].values.tolist()
         allPlates = pd.concat(allPlates)
-        allPlates["Date"] = allPlates["Date"].apply(date_to_time)
-        with open(os.path.join(self.folder,"last run.pkl"), "wb") as f:
+        print("size of allplates is",len(allPlates))
+        #allPlates["Date"] = allPlates["Date"].apply(date_to_time)
+        with open(os.path.join(self.folder,"data","last run.pkl"), "wb") as f:
             pickle.dump({"result":journeys,"allPlates":allPlates,"name":"Non Directional"}, f)
 
 
@@ -398,8 +416,8 @@ class ANPRproject():
 
 
     def calculate_pairs(self,durationCheck, durationBehaviour,durationMaxValue):
-        if os.path.exists(os.path.join(self.folder, "last run.pkl")):
-            os.remove(os.path.join(self.folder, "last run.pkl"))
+        if os.path.exists(os.path.join(self.folder,"data", "last run.pkl")):
+            os.remove(os.path.join(self.folder,"data", "last run.pkl"))
         if self.data is None:
             return self.get_matched_counts([], [])
         journeys = []
@@ -415,21 +433,24 @@ class ANPRproject():
             temp.reset_index(inplace=True)
             temp = temp[temp["movement"] > 0]
             print("no of entries in df",len(temp))
+            allPlates.append(temp.copy())
             temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
             mask = (temp["VRN"] == temp["VRN"].shift(-1))
             temp["matched"] = "N"
             temp.ix[mask, "matched"] = "Y"
-            temp["Date"] = temp["Date"].apply(date_to_time)
+            #temp["Date"] = temp["Date"].apply(date_to_time)
             temp["outTime"] = temp["Date"].shift(-1)
             temp["outMovement"] = temp["movement"].shift(-1)
             temp["movement"] = temp["movement"].real.astype(int)
             temp["outMovement"] = temp["outMovement"].real.astype(int)
-            allPlates.append(temp)
+
             selected = temp[temp["matched"] == "Y"]
             selected["movement"].dropna(inplace=True)
             journeys += selected[["VRN", "Class", "movement", "Date", "outMovement", "outTime"]].values.tolist()
         allPlates = pd.concat(allPlates)
-        with open(os.path.join(self.folder,"last run.pkl"), "wb") as f:
+        print("all opklates")
+        print(allPlates.info())
+        with open(os.path.join(self.folder,"data","last run.pkl"), "wb") as f:
             pickle.dump({"result":journeys,"allPlates":allPlates,"name":"Pairs"}, f)
         journeys = self.check_durations(journeys,durationCheck, durationBehaviour,durationMaxValue)
         #self.save_matched_data(journeys, allPlates, "Pairs",timeType)
@@ -438,8 +459,8 @@ class ANPRproject():
 
 
     def calculate_fs_ls(self,durationCheck,durationBehaviour,durationMaxValue):
-        if os.path.exists(os.path.join(self.folder, "last run.pkl")):
-            os.remove(os.path.join(self.folder, "last run.pkl"))
+        if os.path.exists(os.path.join(self.folder,"data", "last run.pkl")):
+            os.remove(os.path.join(self.folder,"data", "last run.pkl"))
         if self.data is None:
             return self.get_matched_counts([], [])
         journeys = []
@@ -452,7 +473,7 @@ class ANPRproject():
             temp.index.name = "Date"
             temp.reset_index(inplace=True)
             temp = temp[temp["movement"] > 0]
-            temp["Date"] = temp["Date"].apply(date_to_time)
+            #temp["Date"] = temp["Date"].apply(date_to_time)
             print("no of entries in df", len(temp))
             temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
 
@@ -492,14 +513,14 @@ class ANPRproject():
             print(fullResult.head())
         allPlates = pd.concat(allPlates)
         #allPlates["Date"] = allPlates["Date"].apply(date_to_time)
-        with open(os.path.join(self.folder,"last run.pkl"), "wb") as f:
+        with open(os.path.join(self.folder,"data","last run.pkl"), "wb") as f:
             pickle.dump({"result":journeys,"allPlates":allPlates,"name":"First Seen Last Seen"}, f)
         journeys = self.check_durations(journeys, durationCheck, durationBehaviour,durationMaxValue)
         return self.get_matched_counts(journeys,allPlates)
 
 
     def calculate_full_journeys(self,durationCheck,durationBehaviour,durationMaxValue):
-        if not os.path.exists(os.path.join(self.folder,"all journeys as list.pkl")):
+        if not os.path.exists(os.path.join(self.folder,"data","all journeys as list.pkl")):
             return self.get_matched_counts([], [])
         journeys = []
         allPlates = []
@@ -513,7 +534,7 @@ class ANPRproject():
             temp.reset_index(inplace=True)
             print("no of entries in df", len(temp))
             temp = temp[temp["movement"] > 0]
-            temp["Date"] = temp["Date"].apply(date_to_time)
+            #temp["Date"] = temp["Date"].apply(date_to_time)
             print("no of entries in df", len(temp))
             print(temp.head())
             temp.sort_values(by=["VRN", "Date"], inplace=True, ascending=[True, True])
@@ -560,17 +581,22 @@ class ANPRproject():
                     print(temp.head())
                     values = temp[["VRN", "Class", "movement", "Date"]].values.tolist()
                     for v in values:
+                        #print("v is",v)
                         for i in range(2, 4):
                             v[i] = [item for item in v[i].split(",")]
                         l = [item for sublist in list(zip(*[v[2], v[3]])) for item in sublist]
                         l.insert(0, v[1])
                         l.insert(0, v[0])
+
+                        for i in range(3, len(l), 2):
+                            l[i] = datetime.datetime.strptime(l[i], "%Y-%m-%d %H:%M:%S")
+                        #print("l is",l)
                         journeys.append(l)
                         #print("appending",l)
         print("journeys", journeys[:5])
         allPlates = pd.concat(allPlates)
         #allPlates["Date"] = allPlates["Date"].apply(date_to_time)
-        with open(os.path.join(self.folder,"last run.pkl"), "wb") as f:
+        with open(os.path.join(self.folder,"data","last run.pkl"), "wb") as f:
             pickle.dump({"result":journeys,"allPlates":allPlates,"name":"Full Journeys"}, f)
         journeys = self.check_durations(journeys, durationCheck, durationBehaviour,durationMaxValue)
         return self.get_matched_counts(journeys,allPlates)
@@ -579,19 +605,21 @@ class ANPRproject():
     def get_matched_counts(self,journeys,allPlates):
         resultsDict = {} ### holds the counts for the first seen and last seen plate, to display in the matrix
         totalCounts = {int(k):0 for k in self.allMov} ### holds the counts for every plate seen at a movement
+        inTotals = {int(k): 0 for k in self.allMov}
+        outTotals = {int(k): 0 for k in self.allMov}
         print("totalcounts are",totalCounts)
         for journey in journeys:
             #print("journey",journey)
             resultsDict[(int(journey[2]), int(journey[-2]))] = resultsDict.get((int(journey[2]), int(journey[-2])), [])
-            resultsDict[(int(journey[2]), int(journey[-2]))].append(
-                datetime.datetime.strptime(journey[-1], "%d/%m/%Y %H:%M:%S") - datetime.datetime.strptime(journey[3], "%d/%m/%Y %H:%M:%S"))
+            resultsDict[(int(journey[2]), int(journey[-2]))].append(journey[-1] - journey[3])
+            inTotals[int(journey[2])] = inTotals[int(journey[2])] + 1
+            outTotals[int(journey[-2])] = outTotals[int(journey[-2])] + 1
+
             for movement in journey[2::2]:
                 #print("adding 1 to ",movement,type(movement))
                 count  = totalCounts.get(int(movement),0)
-                #print("before, count is",count)
                 count+=1
                 totalCounts[int(movement)] = count
-                #print("after, count is",totalCounts[int(movement)])
 
         ###
         ### set up some indexes so that if any sites have 0 values, we still pick up the sites in the dataframe
@@ -605,7 +633,16 @@ class ANPRproject():
             allDf.loc[int(key[1])]["count"] += len(item)
         allDf.sort_index(inplace=True)
         counts = self.get_plate_count_by_movement(allPlates)
-        return (resultsDict, allDf["count"].to_dict(), counts,totalCounts)
+        total = 0
+        for key,item in inTotals.items():
+            resultsDict[(key,"Total")] = item
+            total +=item
+        for key,item in outTotals.items():
+            resultsDict[("Total",key)] = item
+            total += item
+        resultsDict[("Total","Total")] = total
+
+        return (resultsDict, allDf["count"].to_dict(), counts,totalCounts,inTotals,outTotals)
 
 
     def check_durations(self,journeys,durationCheck, durationBehaviour,durationValue = None):
@@ -662,7 +699,7 @@ class ANPRproject():
                         if len(journey) < 5:
                             del journey[:]
                         while index < len(journey):
-                            diff = datetime.datetime.strptime(journey[index],"%d/%m/%Y %H:%M:%S") - datetime.datetime.strptime(journey[3],"%d/%m/%Y %H:%M:%S")
+                            diff = journey[index]- journey[3]
                             if journey[0] == "LE16RVP":
                                 print("looking at ",journey,journey[index])
                                 print("td is",td)
@@ -695,8 +732,7 @@ class ANPRproject():
                     start = 2
                     while start < len(journey) - 2:
                         # print("start is",start,len(journey) -1)
-                        duration = datetime.datetime.strptime(journey[start + 3], "%d/%m/%Y %H:%M:%S") - \
-                                   datetime.datetime.strptime(journey[start + 1], "%d/%m/%Y %H:%M:%S")
+                        duration = journey[start + 3] - journey[start + 1]
                         v = self.durations[(int(journey[start]), int(journey[start + 2]))]
                         splitTime = v.split(":")
                         hours = int(splitTime[0])
@@ -750,15 +786,16 @@ class ANPRproject():
         return counts
 
 
-    def save_matched_data(self,timeType):
+    def save_matched_data(self,timeType,daysInSeparateSheets):
         ###
         ### This function changes the format of each journey, from the full journey, to the first seen and last seen
         ### movements, and then the full journey
         ###
-        print("timetype is",timeType,type(timeType))
-        if not os.path.exists(os.path.join(self.folder, "last run.pkl")):
+        timeType = 2 # because we only want to output time at the moment, this might change if we go back to different time outputs
+        #print("timetype is",timeType,type(timeType))
+        if not os.path.exists(os.path.join(self.folder,"data", "last run.pkl")):
             return
-        with open(os.path.join(self.folder, "last run.pkl"), "rb") as f:
+        with open(os.path.join(self.folder,"data", "last run.pkl"), "rb") as f:
             data = pickle.load(f)
         journeys = data["result"]
         allPlates = data["allPlates"]
@@ -768,106 +805,83 @@ class ANPRproject():
         ###
         unmatchedData = []
         matchedPlates = []
-        convertedJourneys = []
+
         print("*"*100)
         print("journeys")
-
+        print(journeys[:10])
         print("allplatyes")
-        print(allPlates.head())
-        allPlates = allPlates[["VRN", "Class", "movement", "Date"]]
 
+        allPlates = allPlates[["VRN", "Class", "movement", "Date"]]
+        print(allPlates.info())
         uniqueMatches = [[journey[0], journey[1]] + journey[i:i + 2] for journey in journeys for i in
                          range(2, len(journey), 2)]
-        uniqueMatches = [list(x) for x in set(tuple(x) for x in uniqueMatches)]
-
+        print("fater first loading, unique is",len(uniqueMatches))
+        #uniqueMatches = [list(x) for x in set(tuple(x) for x in uniqueMatches)]
+        #print("fater processing, unique is", len(uniqueMatches))
         journeysDf = pd.DataFrame(uniqueMatches)
+        journeysDf.columns = ["VRN", "Class", "movement", "Date"]
+        print(journeysDf.head())
+        print(journeysDf.info())
+        print("num duplicates",len(journeysDf[journeysDf.duplicated()]))
+        print("non duplicates",len(journeysDf[~journeysDf.duplicated()]))
+        journeysDf = journeysDf.drop_duplicates()
+        journeysDf.sort_values(by=["VRN","Date"],inplace=True)
+        uniqueDates = journeysDf["Date"].map(pd.Timestamp.date).unique()
+
+        print("unique dates are",uniqueDates)
         del uniqueMatches
-        print("journeysDF is")
+        print("journeysDF is",len(journeysDf))
         print(journeysDf.head())
         if len(journeysDf) > 0:
-            journeysDf.columns = ["VRN", "Class", "movement", "Date"]
-            #print(journeysDf[journeysDf["movement"] == "4.0"])
             journeysDf["movement"] = journeysDf["movement"].astype(int)
             print("journeysDf2)")
             print(journeysDf.head())
             print(journeysDf.info())
-            df_all = allPlates.merge(journeysDf.drop_duplicates(), on=["VRN", "Class", "movement", "Date"],
+            df_all = allPlates.merge(journeysDf, on=["VRN", "Class", "movement", "Date"],
                                      how='left', indicator=True)
             print("df all")
             print(df_all.head())
+            print(df_all["_merge"].values.unique())
+            print("len of df all",len(df_all))
+            print("both",len(df_all[df_all["_merge"] == "both"]),"left",len(df_all[df_all["_merge"] == "left_only"]))
+            both = df_all[df_all["_merge"] == "both"]
+
+            df_all[df_all["_merge"] == "both"].to_csv("dumped.csv")
             unmatchedData = df_all[df_all["_merge"] == "left_only"][["VRN", "Class", "movement", "Date"]].sort_values(by=["VRN","Date"])
-            if timeType == 0:
-                unmatchedData["Time"] = unmatchedData["Date"].apply(lambda x:x.split(" ")[1])
-                unmatchedData["Date"] = unmatchedData["Date"].apply(lambda x:x.split(" ")[0])
-            elif timeType == 2:
-                unmatchedData["Date"] = unmatchedData["Date"].apply(lambda x: x.split(" ")[1])
-
-            print(unmatchedData.info())
-            unmatchedData = unmatchedData.values.tolist()
-
-            ###
-            ### set up the data so that it has first seen/last seen, then the full journey
-            ###
-            ### new row formats the journeys for out put, based on what time formats user wants
-            ### original row formats the journeys for use by get_movement_counts
-            ###
-            for i,row in enumerate(journeys):
-                #print("row is",row)
-                newRow = list(row[:3])
-                originalRow = row[:3]
-                originalRow += row[3].split(" ")
-                if timeType == 0:
-                    newRow+= row[3].split(" ")
-                elif timeType == 2:
-                    newRow.append(row[3].split(" ")[1])
-                else:
-                    newRow.append(row[3])
-                newRow.append(row[-2])
-                originalRow.append(row[-2])
-                originalRow+= row[-1].split(" ")
-                if timeType == 0:
-                    newRow+= row[-1].split(" ")
-                elif timeType == 2:
-                    newRow.append(row[-1].split(" ")[1])
-                else:
-                    newRow.append(row[-1])
-                newRow.append("")
-                originalRow.append("")
-                for index in range(2,len(row),2):
-                    newRow.append(row[index])
-                    originalRow.append(row[index])
-                    originalRow+= row[index + 1].split(" ")
-                    if timeType == 0:
-                        newRow += row[index + 1].split(" ")
-                    elif timeType == 2:
-                        newRow.append(row[index + 1].split(" ")[1])
-                    else:
-                        newRow.append(row[index + 1])
-                journeys[i] = originalRow
-                convertedJourneys.append(newRow)
-                #print("new row is",newRow)
-
-            matchedPlates = journeysDf.sort_values(by=["VRN","Date"])
-            del journeysDf
-            if timeType == 0:
-                matchedPlates["Time"] = matchedPlates["Date"].apply(lambda x:x.split(" ")[1])
-                matchedPlates["Date"] = matchedPlates["Date"].apply(lambda x:x.split(" ")[0])
-            elif timeType == 2:
-                matchedPlates["Date"] = matchedPlates["Date"].apply(lambda x: x.split(" ")[1])
-
-            matchedPlates = matchedPlates.values.tolist()
-
             del df_all
+            print(unmatchedData.info())
+            print("all plates", len(allPlates), "matched plates", len(journeysDf),"unmacthed plates",len(unmatchedData))
+            if daysInSeparateSheets:
+                selectedJourneys = []
+                for uniqueDate in uniqueDates:
+                    selectedJourneys = [copy.deepcopy(j) for j in journeys if j[3].date() == uniqueDate]
 
+                    matchedPlates = journeysDf[journeysDf["Date"].dt.date == uniqueDate].sort_values(by=["VRN","Date"])
+                    unmatchedPlates = unmatchedData[unmatchedData["Date"].dt.date == uniqueDate].sort_values(by=["VRN","Date"])
+                    name = self.jobDetails[0] + " " + self.jobDetails[1] + " " + fileTitle + " for " + uniqueDate.strftime("%d %b %Y")  +\
+                           " processed on " + datetime.datetime.now().strftime("%d-%m-%Y") + ".xlsx"
+                    self.output_to_excel(selectedJourneys,unmatchedPlates,matchedPlates,name)
+            else:
+                name = self.jobDetails[0] + " " + self.jobDetails[1] + " " + fileTitle  + datetime.datetime.now().strftime("%d-%m-%Y") + ".xlsx"
+                self.output_to_excel(journeys, unmatchedData, journeysDf, name)
+
+
+
+    def output_to_excel(self,journeys,unmatchedPlates,matchedPlates,fileName):
+        for row in journeys:
+            for i in range(3,len(row),2):
+                row[i] = row[i].time()
+        matchedPlates["Date"] = matchedPlates["Date"].dt.time
+        matchedPlates = matchedPlates.values.tolist()
+        unmatchedPlates["Date"] = unmatchedPlates["Date"].dt.time
+        unmatchedPlates = unmatchedPlates.values.tolist()
         try:
-            name = self.jobDetails[0] + " " + self.jobDetails[1] + " " + fileTitle + " " + \
-                datetime.datetime.now().strftime("%d-%m-%Y") + ".xlsx"
             print("starting")
             wb = pyexcelerate.Workbook()
-            wb.new_sheet("Matches", data=convertedJourneys)
-            wb.new_sheet("Unmatched Plates",data = unmatchedData)
+            wb.new_sheet("Matches", data=journeys)
+            wb.new_sheet("Unmatched Plates", data=unmatchedPlates)
             wb.new_sheet("Matched Plates as list", data=matchedPlates)
-            wb.save(os.path.join(self.folder,"output",name.replace(",","")))
+            wb.save(os.path.join(self.folder, "output", fileName.replace(",", "")))
         except PermissionError as e:
             pass
 

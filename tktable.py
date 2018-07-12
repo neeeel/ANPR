@@ -318,7 +318,7 @@ class Multicolumn_Listbox(object):
             raise ValueError("The multicolumn listbox has only %d columns" % self._number_of_columns)
 
         if index is None:
-            index = "end"#self._number_of_rows - 1
+            index = self._number_of_rows - 1
         if iid is None:
             item_ID = self.interior.insert('', index, values=data)
         else:

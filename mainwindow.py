@@ -1055,8 +1055,9 @@ class mainWindow(tkinter.Tk):
             pickle.dump(self.durationsDictionary,f)
         self.durationMatrix.draw(inMov,outMov,self.durationsDictionary,self.currentJob)
 
-    def duration_matrix_clicked(self,row,column):
 
+
+    def duration_matrix_clicked(self,row,column):
         win=tkinter.Toplevel()
         win.wm_title("in " + str(row) + " - out " + str(column))
         frame = tkinter.Frame(win)
@@ -1957,7 +1958,7 @@ class mainWindow(tkinter.Tk):
             txt = self.Dbfile.split("/")[-1]
 
         l.bind("<Button-3>", self.open_database_file_location)
-        l.bind("<Button-1>",self.get_database_file_location)
+        l.bind("<Button-1>",self.F)
         l.grid(row=1, column=1)
         l.configure(text=txt)
         tkinter.Button(win, text="Create", font=f, command=lambda: self.create_database(e,l,win)).grid(row=2, column=0,padx=10,pady=10)

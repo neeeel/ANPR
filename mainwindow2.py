@@ -114,10 +114,14 @@ class mainWindow(tkinter.Tk):
         self.state('zoomed')
         self.menubar = tkinter.Menu(self)
         menu = tkinter.Menu(self.menubar, tearoff=0)
-        #menu.add_command(label="Change Settings", command=self.spawn_settings_window)
+        menu.add_command(label="Set Database File", command=self.set_database_file)
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
-        self.spawn_main_screen()
+        self.load_settings()
+        if myDB.get_db_file() is None:
+            self.set_database_file()
+        else:
+            self.spawn_main_screen()
 
 
 
@@ -149,13 +153,6 @@ class mainWindow(tkinter.Tk):
         ### and allows you to add, edit or delete projects
         ###
 
-        try:
-            self.joblist = myDB.get_jobs()
-        except :
-            messagebox.showinfo(message="Couldnt open database, please select a database file")
-            self.spawn_settings_window()
-            return
-
         self.entryValues = []
         for child in self.winfo_children()[1:]:
             child.destroy()
@@ -167,7 +164,7 @@ class mainWindow(tkinter.Tk):
         self.plus = ImageTk.PhotoImage(Image.open("green-plus.png").resize((25, 25), Image.ANTIALIAS))
         label = tkinter.Label(frame,image=self.logo, bg="white")
         label.grid(row=0,column=0,padx=20)
-        label = tkinter.Label(frame, text= "MatchPro V 2.0", bg="white",font=f)
+        label = tkinter.Label(frame, text= "MatchPro v2.0", bg="white",font=f)
         label.grid(row=0, column=1,padx=20)
 
         ###
@@ -177,7 +174,7 @@ class mainWindow(tkinter.Tk):
         frame.pack(side = tkinter.TOP)  # grid(row=0, column=0)
         cols = ("Delete", "Edit", "Match","OV Template", "Project Name", "Project No", "Project Date")
         f = tkinter.font.Font(family="times new roman", size=12)
-        self.table = tktable.Tk_Table(frame, columns=cols,cell_anchor="center",cell_font=f,row_numbers=False,height=40)
+        self.table = tktable.Tk_Table(frame, columns=cols,cell_anchor="center",cell_font=f,row_numbers=False,height=40,stripped_rows=("white", "#f2f2f2"))
         self.table.pack(side=tkinter.LEFT)
         tkinter.Button(frame, image=self.plus, bg="white",command=self.spawn_edit_screen).pack(side=tkinter.LEFT,anchor="n")
         self.table.set_callback(self.table_clicked)
@@ -279,10 +276,6 @@ class mainWindow(tkinter.Tk):
         c.grid(row=20, column=1)
         c.var = var
 
-
-
-
-
         tkinter.Entry(frame, width=20, bg="white").grid(row=21, column=1, pady=2, padx=10, sticky="w")
         frame = tkinter.Frame(frame, width=330, height=150, bg="white", relief=tkinter.GROOVE, borderwidth=2)
         frame.grid(row=22, column=0,columnspan=2,sticky="n")
@@ -290,6 +283,7 @@ class mainWindow(tkinter.Tk):
         tkinter.Button(frame, text="SAVE",command=self.save_project).grid(row=0, column=1, sticky="nsew")
         tkinter.Button(frame, text="IMPORT").grid(row=0, column=2, sticky="nsew")
         tkinter.Button(frame, text="LOAD PLATES",command=self.add_plates_file).grid(row=1, column=0, columnspan=3,sticky="nsew")
+        tkinter.Button(frame, text="CHANGE FOLDER",command=self.change_project_folder).grid(row=2, column=0, columnspan=3,sticky="nsew")
         #tkinter.Button(frame, text="MATCH",command=lambda p = self.project:self.spawn_matching_results_screen(p)).grid(row=2, column=0, columnspan=3,sticky="nsew")
         frame =  tkinter.Frame(outerFrame, width=330, height=800, bg="white", relief=tkinter.GROOVE, borderwidth=2)
         frame.grid(row=0, column=1,rowspan=2,sticky="n")
@@ -337,7 +331,7 @@ class mainWindow(tkinter.Tk):
         controlPanel = tkinter.Frame(outerFrame,bg="white")
         controlPanel.grid(row=0, column=0, sticky="ns")
         e = tkinter.Entry(controlPanel,width=20,bg="white")
-        e.grid(row=0,column= 0)
+        e.grid(row=0,column= 0,sticky="nsew")
         e.bind("<Return>",self.add_filter)
         lb = tkinter.Listbox(controlPanel,bg="light grey",height=5)
         lb.grid(row=1,column=0,sticky="ew")
@@ -373,17 +367,16 @@ class mainWindow(tkinter.Tk):
         c.radioVar = var
 
 
-        tkinter.Label(controlPanel,text = "Time Format",bg=self.tracsisBlue,fg="white").grid(row=16,column=0,sticky="nsew",pady=(10,0))
+        tkinter.Label(controlPanel,text = "Output to Excel",bg=self.tracsisBlue,fg="white").grid(row=16,column=0,sticky="nsew",pady=(10,0))
         var = tkinter.IntVar()
-        b = tkinter.Radiobutton(controlPanel,text = "date/time",value = 0,variable = var)
-        b.grid(row=17,column=0,sticky="nsew")
-        b.var = var
-        tkinter.Radiobutton(controlPanel, text="date + time",value = 1,variable = var).grid(row=18, column=0,sticky="nsew")
-        tkinter.Radiobutton(controlPanel, text="time only",value = 2,variable = var).grid(row=19, column=0,sticky="nsew")
-        tkinter.Button(controlPanel, text="Output",command=lambda: self.button_clicked(6),height=2).grid(row=20, column=0, sticky="nsew",pady=(5,0))
-        tkinter.Button(controlPanel, text="Open \n Folder",command=lambda: self.button_clicked(7),height=2).grid(row=21, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Edit \n Project",command=lambda: self.button_clicked(8),height=2).grid(row=22, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Back",command=self.spawn_main_screen,height=2).grid(row=23, column=0, sticky="nsew")
+        c = tkinter.Checkbutton(controlPanel, text="Days to separate sheets", variable=var)
+        c.var = var
+        c.var.set(1)
+        c.grid(row=17, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Output",command=lambda: self.button_clicked(6),height=2).grid(row=18, column=0, sticky="nsew",pady=(0,10))
+        tkinter.Button(controlPanel, text="Open \n Folder",command=lambda: self.button_clicked(7),height=2).grid(row=19, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Edit \n Project",command=lambda: self.button_clicked(8),height=2).grid(row=20, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Back",command=self.spawn_main_screen,height=2).grid(row=21, column=0, sticky="nsew")
 
         dataPanel = tkinter.Frame(outerFrame, bg="white")
         dataPanel.grid(row=0, column=1, sticky="ns",padx=20)
@@ -450,6 +443,68 @@ class mainWindow(tkinter.Tk):
 #
 ###############################################################################################
 
+    def load_settings(self):
+        try:
+            f = open("settings.txt", "r")
+        except FileNotFoundError as e:
+            f = open("settings.txt", "w")
+            f.close()
+            f = open("settings.txt", "r")
+        try:
+            file = f.readline().rstrip()
+
+        except Exception as e:
+            print(e)
+            return None
+        if file == "":
+            file = None
+        print("db file is",file)
+        myDB.set_file(file)
+
+
+    def save_settings(self):
+        file = myDB.get_db_file()
+        if (file == "") | (file is None):
+            #messagebox.showinfo(message="No Database Selected")
+            return
+        if ".sqlite" not in file:
+            #messagebox.showinfo(message="The selected database file must be a .sqlite file")
+            return
+        dir = os.getcwd()
+        print("dir is",dir)
+        f = open("settings.txt","w")
+        f.write(file +  "\n")
+        myDB.set_file(file)
+
+
+    def set_database_file(self):
+        ###
+        ### prompt the user with a file navigation dialog, to select the location of the job database
+        ### display the selected location in a label in the settings window
+        ###
+
+        file = filedialog.askopenfilename()
+        if file == "" or ".sqlite" not in file:
+            messagebox.showinfo(message="No File Selected")
+            return
+
+        myDB.set_file(file)
+        self.save_settings()
+        self.spawn_main_screen()
+
+
+    def change_project_folder(self):
+        if self.projectId is None:
+            messagebox.showinfo(message = "Please select project folder after you have saved the project")
+            return
+        file = filedialog.askdirectory()
+        if file == "" or file is None:
+            messagebox.showinfo(message = "No folder selected, change not saved")
+            return
+        myDB.change_project_folder(self.projectId,file)
+        messagebox.showinfo(message="Project Folder Changed")
+
+
     def remove_filter(self,event):
         lb = event.widget
         if len(lb.curselection())==0:
@@ -459,12 +514,13 @@ class mainWindow(tkinter.Tk):
 
     def fill_duration_matrix(self,e):
         text = e.get()
+        print("in fill matrix, text is",text)
         if text.strip() == "":
             return
         if self.validate_time(text):
             e.delete(0, tkinter.END)
-            if os.path.exists(os.path.join(self.project.folder, "durations.pkl")):
-                os.remove(os.path.join(self.project.folder, "durations.pkl"))
+            if os.path.exists(os.path.join(self.project.folder,"data", "durations.pkl")):
+                os.remove(os.path.join(self.project.folder,"data", "durations.pkl"))
             self.project.load_durations(text)
             self.durationMatrix.draw(data=self.project.get_durations())
         else:
@@ -475,6 +531,8 @@ class mainWindow(tkinter.Tk):
     def display_movement_data(self,mov):
         #print("looking for movement",mov)
         if self.data is None:
+            return
+        if mov == "Total":
             return
         frame = self.winfo_children()[2].winfo_children()[1]
         frame.winfo_children()[8].config(text=str(mov))
@@ -548,6 +606,9 @@ class mainWindow(tkinter.Tk):
             messagebox.showinfo(message="No file selected, no plates loaded")
             return
         myDB.set_uploaded_file(self.projectId,file)
+        proj = ANPRproject.ANPRproject()
+        proj.load_project(self.projectId)
+        proj.clear_data_folder()
         messagebox.showinfo(message="Successfully added plates file")
 
 
@@ -555,9 +616,9 @@ class mainWindow(tkinter.Tk):
         selectedDisplay = event.widget.current()
         if not self.data is None:
             if selectedDisplay> 0:
-                self.matrix.draw(self.data[0], index=selectedDisplay,fontsize=7)
+                self.matrix.draw(self.data[0], index=selectedDisplay,fontsize=7,totals=True)
             else:
-                self.matrix.draw(self.data[0],index=selectedDisplay)
+                self.matrix.draw(self.data[0],index=selectedDisplay,totals=True)
         pass
 
 
@@ -576,7 +637,8 @@ class mainWindow(tkinter.Tk):
         print(durationCheck,durationBehaviour,maxVal)
         selectedDisplay = self.winfo_children()[2].winfo_children()[1].winfo_children()[7].current()
         print("selectedDsiplay is",selectedDisplay)
-        timeType = frame.winfo_children()[17].var.get()
+        timeType = 2#frame.winfo_children()[17].var.get()
+        daysInSeparateSheets = frame.winfo_children()[17].var.get()
         filters = []
         if lb.get(0) == "ALL":
             filters = ["I-B*-O","(I-B-B*)-I","O-(B-B*-O)","I-B-B*!","^B-B*-O","^B-B-B*!"]
@@ -591,29 +653,29 @@ class mainWindow(tkinter.Tk):
             lb.delete(0, tkinter.END)
         if index >=1 and index < 6:
             self.matrix.clear()
-            self.update()
+            #self.matrix.update()
         if index == 1:
             self.data = self.project.calculate_regex_matching(filters, durationCheck, durationBehaviour, maxVal)
             print("result is", self.data)
-            self.matrix.draw(self.data[0])
+            self.matrix.draw(self.data[0],totals=True)
         if index == 2:
             self.data = self.project.calculate_nondirectional_cordon(durationCheck,durationBehaviour,maxVal)
             print("result is",self.data)
-            self.matrix.draw(self.data[0])
+            self.matrix.draw(self.data[0],totals=True)
         if index == 3:
             self.data = self.project.calculate_pairs(durationCheck, durationBehaviour, maxVal)
             print("result is", self.data)
-            self.matrix.draw(self.data[0])
+            self.matrix.draw(self.data[0],totals=True)
         if index == 4:
             self.data = self.project.calculate_fs_ls(durationCheck, durationBehaviour, maxVal)
             print("result is", self.data)
-            self.matrix.draw(self.data[0])
+            self.matrix.draw(self.data[0],totals=True)
         if index == 5:
             self.data = self.project.calculate_full_journeys(durationCheck, durationBehaviour, maxVal)
             print("result is", self.data)
-            self.matrix.draw(self.data[0])
+            self.matrix.draw(self.data[0],totals=True)
         if index == 6:
-            self.project.save_matched_data(timeType)
+            self.project.save_matched_data(timeType,daysInSeparateSheets)
             messagebox.showinfo(message="Output complete")
         if index == 7:
             print("folder is",self.project.folder)
@@ -637,8 +699,25 @@ class mainWindow(tkinter.Tk):
             self.display_project(iid)
         elif col == 2:
             print("loading project", iid)
+            folder = myDB.get_folder(iid)
+            if folder is None or folder == "" or not os.path.exists(folder):
+                messagebox.showinfo(message="No project folder selected, or current project folder doesnt exist. Please select new folder")
+                self.display_project(iid)
+                return
+            file = myDB.get_uploaded_file(iid)
+            if file == "" or file is None:
+                messagebox.showinfo(message="no plates loaded")
+                self.display_project(iid)
+                return
             proj = ANPRproject.ANPRproject()
             proj.load_project(iid)
+            if len(proj.allMov) == 0:
+                messagebox.showinfo(message="no movements, or all movement details are blank")
+                self.display_project(iid)
+                return
+
+            if not proj.load_plates():
+                return
             self.spawn_matching_results_screen(proj)
         #elif col == 3:
          #   print("loading project", iid)
@@ -674,7 +753,9 @@ class mainWindow(tkinter.Tk):
             tkinter.Label(frame.interior, text="Site " + str((i//2) + 1), bg="white",fg=self.tracsisBlue,relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=2+i, column=0, sticky="nsew")
             tkinter.Entry(frame.interior, width=10, bg="white").grid(row=2+i, column=1, pady=2, padx=10, sticky="w")
             tkinter.Label(frame.interior, text=str(i+1), bg="white",fg=self.tracsisBlue,relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=2+i, column=2, sticky="nsew")
-            tkinter.Entry(frame.interior, width=10, bg="white").grid(row=2+i, column=3, pady=2, padx=10, sticky="w")
+            e = tkinter.Entry(frame.interior, width=10, bg="white")
+            e.grid(row=2+i, column=3, pady=2, padx=10, sticky="w")
+            e.insert(0,str(i+1))
             box = ttk.Combobox(frame.interior, width=15)
             box["values"] = ("In", "Out", "Both")
             box.grid(row=2+i, column=4, pady=2, padx=10, sticky="w")
@@ -711,6 +792,7 @@ class mainWindow(tkinter.Tk):
             #frame.interior.winfo_children()[startIndex].config(text=str(movement[0]))
             frame.interior.winfo_children()[startIndex + 1].insert(0,str(movement[1]))
             #frame.interior.winfo_children()[startIndex + 2].config(text=str(movement[2]))
+            frame.interior.winfo_children()[startIndex + 3].delete(0,"end")
             frame.interior.winfo_children()[startIndex + 3].insert(0,str(movement[3]))
             frame.interior.winfo_children()[startIndex + 4].current(["I","O","B"].index((movement[4])))
 
@@ -780,15 +862,14 @@ class mainWindow(tkinter.Tk):
         self.projectId = myDB.save_project({"project":data,"movements":movements})
         print("project id is",self.projectId)
         if self.projectId:
+            proj = ANPRproject.ANPRproject()
+            proj.load_project(self.projectId)
+            proj.clear_data_folder()
             messagebox.showinfo(message="Saved Successfully")
         else:
             messagebox.showinfo(message="Couldnt Save Project")
             return
-        folder = myDB.get_folder(self.projectId)
-        if os.path.exists(os.path.join(folder,"data.pkl")):
-            os.remove(os.path.join(folder,"data.pkl"))
-        if os.path.exists(os.path.join(folder,"durations.pkl")):
-            os.remove(os.path.join(folder,"durations.pkl"))
+
 
 
     def time_focus_out(self,event):

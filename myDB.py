@@ -239,6 +239,16 @@ def set_uploaded_file(id,file):
     conn.commit()
 
 
+def change_project_folder(id,file):
+    global databaseFile
+    conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    conn.execute('pragma foreign_keys=ON')
+    cur = conn.cursor()
+    print("successfully opend db")
+    result = cur.execute("UPDATE project set  folder = ?  where id = ?", (file,id)).fetchone()
+    conn.commit()
+
+
 def get_times(id):
     global databaseFile
     conn = sqlite3.connect(databaseFile, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
@@ -297,6 +307,16 @@ def get_movements(jobId):
         "SELECT newMov from movement "
         "WHERE jobID = ?", (str(jobId),)).fetchall()
     return [[i[0] for i in inMov], [i[0] for i in outMov], [i[0] for i in allMov]]
+
+
+def get_db_file():
+    global databaseFile
+    return databaseFile
+
+
+def set_file(file):
+    global databaseFile
+    databaseFile = file
 
 ##################################################################################################################
 #
@@ -605,7 +625,7 @@ def check_Db_file():
     except Exception as e:
         return False
 
-databaseFile = ""
+databaseFile = None
 #save_Job(data,file)
 #job = load_job("3279-Lon","Oxford","07/05/16")
 #print(job["folder"])
