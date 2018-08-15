@@ -32,6 +32,10 @@ class VerticalScrolledFrame(tkinter.Frame):
     def __init__(self, parent, *args, **kw):
         tkinter.Frame.__init__(self, parent, *args, **kw)
         print("height of scroll",parent.winfo_height())
+        if "height" in kw:
+            print("yay")
+        height = kw["height"]
+        self.maxheight = height
         parentOfparent = self.nametowidget(parent.winfo_parent())
         #parentOfparent.configure(bg="black")
         print("parent of parent height is",parentOfparent.winfo_height())
@@ -39,7 +43,7 @@ class VerticalScrolledFrame(tkinter.Frame):
         vscrollbar = tkinter.Scrollbar(self, orient=tkinter.VERTICAL,bg="white")
         vscrollbar.pack(fill=tkinter.Y, side=tkinter.RIGHT, expand=tkinter.TRUE)
         self.canvas = tkinter.Canvas(self, bd=0, highlightthickness=0,bg="white",
-                        yscrollcommand=vscrollbar.set,height = 800-64)
+                        yscrollcommand=vscrollbar.set,height = self.maxheight-64)
         self.canvas.bind_all("<MouseWheel>",self.on_mousewheel)
         self.canvas.bind("<Enter>",self.on_entry)
         self.canvas.bind("<Leave>", self.on_exit)
@@ -66,9 +70,11 @@ class VerticalScrolledFrame(tkinter.Frame):
             if interior.winfo_reqwidth() != self.canvas.winfo_width():
                 # update the canvas's width to fit the inner frame
                 self.canvas.config(width=interior.winfo_reqwidth())
-            #if interior.winfo_reqheight() != self.canvas.winfo_height():
+            if interior.winfo_reqheight() < self.maxheight:
                 # update the canvas's height to fit the inner frame
-                #self.canvas.config(height=interior.winfo_reqheight())
+                self.canvas.config(height=interior.winfo_reqheight())
+            else:
+                self.canvas.config(height=self.maxheight)
             #print("actual size is", canvas.winfo_width(), canvas.winfo_height())
         interior.bind('<Configure>', _configure_interior)
 
@@ -108,6 +114,7 @@ class mainWindow(tkinter.Tk):
         self.tracsisBlue = "#%02x%02x%02x" % (20, 27, 77)
         self.tracsisGrey = "#%02x%02x%02x" % (99, 102, 106)
         self.configure(bg="white")
+        self.progressWin = None
         ttk.Style().configure(".", bg="white",fg="red")
         style = ttk.Style(self)
         style.configure('Treeview', rowheight=40)  # SOLUTION
@@ -117,6 +124,7 @@ class mainWindow(tkinter.Tk):
         menu.add_command(label="Set Database File", command=self.set_database_file)
         self.menubar.add_cascade(label="Settings", menu=menu)
         self.config(menu=self.menubar)
+        print("loading settings")
         self.load_settings()
         if myDB.get_db_file() is None:
             self.set_database_file()
@@ -174,23 +182,37 @@ class mainWindow(tkinter.Tk):
         frame.pack(side = tkinter.TOP)  # grid(row=0, column=0)
         cols = ("Delete", "Edit", "Match","OV Template", "Project Name", "Project No", "Project Date")
         f = tkinter.font.Font(family="times new roman", size=12)
-        self.table = tktable.Tk_Table(frame, columns=cols,cell_anchor="center",cell_font=f,row_numbers=False,height=40,stripped_rows=("white", "#f2f2f2"))
+        if self.winfo_screenheight() < 1000:
+            height = 20
+        else:
+            height = 40
+        self.table = tktable.Tk_Table(frame, columns=cols,cell_anchor="center",cell_font=f,row_numbers=False,height=height,stripped_rows=("white", "#f2f2f2"))
         self.table.pack(side=tkinter.LEFT)
         tkinter.Button(frame, image=self.plus, bg="white",command=self.spawn_edit_screen).pack(side=tkinter.LEFT,anchor="n")
         self.table.set_callback(self.table_clicked)
+        for i in range(3):
+            self.table._multicolumn_listbox.interior.column(i, width=65, anchor='center')
+        self.table._multicolumn_listbox.interior.column(3, width=100, anchor='center')
+        self.table._multicolumn_listbox.interior.column(5, width=100, anchor='center')
+        self.table._multicolumn_listbox.interior.column(6, width=100, anchor='center')
         self.display_project_list()
 
 
     def spawn_edit_screen(self):
+        self.projectId = None
         for child in self.winfo_children()[2:]:
             child.destroy()
         f = tkinter.font.Font(family="times new roman", size=12)
         headerFont = tkinter.font.Font(family="times new roman", size=20,weight=tkinter.font.BOLD)
+
         outerFrame = tkinter.Frame(self,bg="white")
         outerFrame.pack()
-        frame = tkinter.Frame(outerFrame, width=330, height=150, bg="white", relief=tkinter.GROOVE, borderwidth=2)
-        frame.grid(row=0,column=0,sticky="n")
-        tkinter.Label(frame,text = "Project Details",bg=self.tracsisBlue,fg="white",font=headerFont).grid(row=0,column=0,columnspan=3,sticky="nsew")
+        innerFrame = tkinter.Frame(outerFrame, width=330, height=150, bg="white", relief=tkinter.GROOVE, borderwidth=2)
+        innerFrame.grid(row=0,column=0,sticky="n")
+        tkinter.Label(innerFrame,text = "Project Details",bg=self.tracsisBlue,fg="white",font=headerFont).grid(row=0,column=0,columnspan=3,sticky="nsew")
+        scrolledFrame = VerticalScrolledFrame(innerFrame, bg="beige", height= self.winfo_screenheight() - 300)
+        scrolledFrame.grid(row=1,column=0,sticky="n")
+        frame = scrolledFrame.interior
         tkinter.Label(frame, text="Job No", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=1, column=0, sticky="nsew")
         tkinter.Label(frame, text="Job Name", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=2, column=0, sticky="nsew")
         tkinter.Label(frame, text="Date", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=3, column=0, sticky="nsew")
@@ -213,6 +235,7 @@ class mainWindow(tkinter.Tk):
         tkinter.Label(frame, text="Split", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=20, column=0, sticky="nsew")
 
         tkinter.Label(frame, text="Classes", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=21, column=0, sticky="nsew")
+        tkinter.Label(frame, text="Loaded Plates", bg="light grey",relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=22, column=0, sticky="nsew")
         tkinter.Entry(frame, width=20,  bg="white").grid(row=1, column=1, pady=2,padx=10)
         tkinter.Entry(frame, width=20, bg="white").grid(row=2, column=1, pady=2, padx=10,sticky="w")
         e = tkinter.Entry(frame, width=20, bg="white")
@@ -277,13 +300,17 @@ class mainWindow(tkinter.Tk):
         c.var = var
 
         tkinter.Entry(frame, width=20, bg="white").grid(row=21, column=1, pady=2, padx=10, sticky="w")
-        frame = tkinter.Frame(frame, width=330, height=150, bg="white", relief=tkinter.GROOVE, borderwidth=2)
-        frame.grid(row=22, column=0,columnspan=2,sticky="n")
+        tkinter.Label(frame, text="None", bg="white",relief=tkinter.GROOVE,borderwidth=2, font=f,wraplength=120).grid(row=22, column=1, sticky="nsew")
+
+
+        frame = tkinter.Frame(innerFrame, width=330, height=150, bg="white", relief=tkinter.GROOVE, borderwidth=2)
+        frame.grid(row=2, column=0,columnspan=2,sticky="n")
         tkinter.Button(frame,text="BACK",command=self.spawn_main_screen).grid(row=0,column=0,sticky="nsew")
         tkinter.Button(frame, text="SAVE",command=self.save_project).grid(row=0, column=1, sticky="nsew")
-        tkinter.Button(frame, text="IMPORT").grid(row=0, column=2, sticky="nsew")
+        tkinter.Button(frame, text="IMPORT",state=tkinter.DISABLED).grid(row=0, column=2, sticky="nsew")
         tkinter.Button(frame, text="LOAD PLATES",command=self.add_plates_file).grid(row=1, column=0, columnspan=3,sticky="nsew")
         tkinter.Button(frame, text="CHANGE FOLDER",command=self.change_project_folder).grid(row=2, column=0, columnspan=3,sticky="nsew")
+        tkinter.Button(frame, text="OPEN FOLDER",command=self.open_folder_from_edit_screen).grid(row=3, column=0, columnspan=3,sticky="nsew")
         #tkinter.Button(frame, text="MATCH",command=lambda p = self.project:self.spawn_matching_results_screen(p)).grid(row=2, column=0, columnspan=3,sticky="nsew")
         frame =  tkinter.Frame(outerFrame, width=330, height=800, bg="white", relief=tkinter.GROOVE, borderwidth=2)
         frame.grid(row=0, column=1,rowspan=2,sticky="n")
@@ -306,21 +333,20 @@ class mainWindow(tkinter.Tk):
         self.durationMatrix = matrix.MatrixDisplay(frame, width, height,project,clickable=True)
 
 
-    def spawn_matching_results_screen(self,project):
-        print("project is",project)
-        if project is None:
+    def spawn_matching_results_screen(self):
+        print("project is",self.project)
+        if self.project is None:
             return
-        self.project = project
 
         for child in self.winfo_children()[2:]:
             if type(self.nametowidget(child)) != tkinter.Toplevel:
                 child.destroy()
         if self.winfo_screenheight() >900:
-            width = 1000
-            height = 800
+            width = 1200
+            height = 830
         else:
-            width = self.winfo_screenwidth() - 300
-            height = self.winfo_screenheight() - 200
+            width = self.winfo_screenwidth() - 500
+            height = self.winfo_screenheight() - 250
         print("set width and height to ",width,height)
         f = tkinter.font.Font(size=12)
         #tkinter.Label(self, bg="white", text=matchingType + " Matching", font=f, fg=self.tracsisBlue).grid(row=0,column=0,columnspan=3,pady = 20)
@@ -328,8 +354,9 @@ class mainWindow(tkinter.Tk):
         outerFrame = tkinter.Frame(self,bg="white",height = height, relief=tkinter.GROOVE, borderwidth=3)
         outerFrame.pack(anchor="w",fill=tkinter.X)
 
-        controlPanel = tkinter.Frame(outerFrame,bg="white")
+        controlPanel = VerticalScrolledFrame(outerFrame,bg="white",height=height)# tkinter.Frame(outerFrame,bg="white")
         controlPanel.grid(row=0, column=0, sticky="ns")
+        controlPanel=controlPanel.interior
         e = tkinter.Entry(controlPanel,width=20,bg="white")
         e.grid(row=0,column= 0,sticky="nsew")
         e.bind("<Return>",self.add_filter)
@@ -338,45 +365,55 @@ class mainWindow(tkinter.Tk):
         lb.bind("<Double-Button-1>", self.remove_filter)
         tkinter.Button(controlPanel, text="Clear",command=lambda: self.button_clicked(0),height=2).grid(row=2, column=0, sticky="nsew")
         tkinter.Button(controlPanel,text = "Run",command=lambda: self.button_clicked(1),height=2).grid(row=3,column=0,sticky="nsew")
-        tkinter.Button(controlPanel, text="Non-Dir",command=lambda: self.button_clicked(2),height=2).grid(row=4, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Pairs",command=lambda: self.button_clicked(3),height=2).grid(row=5, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Fs-Ls",command=lambda: self.button_clicked(4),height=2).grid(row=6, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Full \n Journeys",command=lambda: self.button_clicked(5),height=2).grid(row=7, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="In Out",command=lambda: self.button_clicked(2),height=2).grid(row=4, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Non-Dir",command=lambda: self.button_clicked(3),height=2).grid(row=5, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Pairs",command=lambda: self.button_clicked(4),height=2).grid(row=6, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Fs-Ls",command=lambda: self.button_clicked(5),height=2).grid(row=7, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Full \n Journeys",command=lambda: self.button_clicked(6),height=2).grid(row=8, column=0, sticky="nsew")
 
-        tkinter.Label(controlPanel,text = "Durations",bg=self.tracsisBlue,fg="white").grid(row=8,column=0,sticky="nsew",pady=(10,0))
+        tkinter.Label(controlPanel,text = "Filter Behaviour",bg=self.tracsisBlue,fg="white").grid(row=9,column=0,sticky="nsew",pady=(10,0))
+        var = tkinter.IntVar()
+        var.set(0)
+        tkinter.Radiobutton(controlPanel,text = "Filter on Remainder",variable = var,value = 0).grid(row=10,column=0,sticky="nsew")
+        tkinter.Radiobutton(controlPanel, text="Full Journey for each filter",variable = var,value = 1).grid(row=11, column=0,sticky="nsew")
+        lb.filterVar = var
+
+        tkinter.Label(controlPanel,text = "Durations",bg=self.tracsisBlue,fg="white").grid(row=12,column=0,sticky="nsew",pady=(10,0))
         var = tkinter.IntVar()
         var.trace("w", self.duration_checkbox_clicked)
         c = tkinter.Checkbutton(controlPanel,text = "Duration Check",variable = var)
         c.var = var
-        c.grid(row=9,column = 0, sticky="nsew")
+        c.grid(row=13,column = 0, sticky="nsew")
 
         var = tkinter.IntVar()
-        tkinter.Radiobutton(controlPanel,text = "Split",state="disabled",value = 0,variable = var).grid(row=10,column=0,sticky="nsew")
-        tkinter.Radiobutton(controlPanel, text="Discard",state="disabled",value = 1,variable = var).grid(row=11, column=0,sticky="nsew")
+        tkinter.Radiobutton(controlPanel,text = "Split",state="disabled",value = 0,variable = var).grid(row=14,column=0,sticky="nsew")
+        tkinter.Radiobutton(controlPanel, text="Discard",state="disabled",value = 1,variable = var).grid(row=15, column=0,sticky="nsew")
         c.radioVar = var
 
         var = tkinter.IntVar()
         var.trace("w", self.max_checkbox_clicked)
         c = tkinter.Checkbutton(controlPanel, text="Max", variable=var)
         c.var = var
-        c.grid(row=12, column=0, sticky="nsew")
-        tkinter.Entry(controlPanel,width=4).grid(row=13,column=0,sticky="nsew")
+        c.grid(row=16, column=0, sticky="nsew")
+        tkinter.Entry(controlPanel,width=4,state=tkinter.DISABLED).grid(row=17,column=0,sticky="nsew")
         var = tkinter.IntVar()
-        tkinter.Radiobutton(controlPanel, text="Split", state="disabled",value = 0,variable = var).grid(row=14, column=0, sticky="nsew")
-        tkinter.Radiobutton(controlPanel, text="Discard", state="disabled",value = 1,variable = var).grid(row=15, column=0, sticky="nsew")
+        tkinter.Radiobutton(controlPanel, text="Split", state="disabled",value = 0,variable = var).grid(row=18, column=0, sticky="nsew")
+        tkinter.Radiobutton(controlPanel, text="Discard", state="disabled",value = 1,variable = var).grid(row=19, column=0, sticky="nsew")
         c.radioVar = var
 
 
-        tkinter.Label(controlPanel,text = "Output to Excel",bg=self.tracsisBlue,fg="white").grid(row=16,column=0,sticky="nsew",pady=(10,0))
+        tkinter.Label(controlPanel,text = "Output to Excel",bg=self.tracsisBlue,fg="white").grid(row=20,column=0,sticky="nsew",pady=(10,0))
         var = tkinter.IntVar()
-        c = tkinter.Checkbutton(controlPanel, text="Days to separate sheets", variable=var)
-        c.var = var
-        c.var.set(1)
-        c.grid(row=17, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Output",command=lambda: self.button_clicked(6),height=2).grid(row=18, column=0, sticky="nsew",pady=(0,10))
-        tkinter.Button(controlPanel, text="Open \n Folder",command=lambda: self.button_clicked(7),height=2).grid(row=19, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Edit \n Project",command=lambda: self.button_clicked(8),height=2).grid(row=20, column=0, sticky="nsew")
-        tkinter.Button(controlPanel, text="Back",command=self.spawn_main_screen,height=2).grid(row=21, column=0, sticky="nsew")
+        #c = tkinter.Checkbutton(controlPanel, text="Days to separate sheets", variable=var)
+        #c.var = var
+        #c.var.set(1)
+        #c.grid(row=17, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Output",command=lambda: self.button_clicked(7),height=2).grid(row=21, column=0, sticky="nsew",pady=(0,10))
+        tkinter.Button(controlPanel, text="Open \n Folder",command=lambda: self.button_clicked(8),height=2).grid(row=22, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Edit \n Project",command=lambda: self.button_clicked(9),height=2).grid(row=23, column=0, sticky="nsew")
+        tkinter.Button(controlPanel, text="Back",command=self.spawn_main_screen,height=2).grid(row=24, column=0, sticky="nsew")
+
+        print("required height of control panel is",controlPanel.winfo_reqheight())
 
         dataPanel = tkinter.Frame(outerFrame, bg="white")
         dataPanel.grid(row=0, column=1, sticky="ns",padx=20)
@@ -408,7 +445,7 @@ class mainWindow(tkinter.Tk):
         nb.grid(row=0,column=0)
 
         matrixFrame = tkinter.Frame(frame, relief=tkinter.GROOVE, borderwidth=3, bg="white", width=width, height=height)
-        self.matrix = matrix.MatrixDisplay(matrixFrame, width, height,project,clickable=False)
+        self.matrix = matrix.MatrixDisplay(matrixFrame, width, height,self.project,clickable=False)
         self.matrix.set_matrix_clicked_callback_function(self.display_movement_data)
         nb.add(matrixFrame,text="Matches")
 
@@ -425,7 +462,7 @@ class mainWindow(tkinter.Tk):
         matrixFrame = tkinter.Frame(frame, relief=tkinter.GROOVE, borderwidth=3, bg="white", width=width, height=height)
         matrixFrame.grid(row=1,column=0,columnspan=3)
 
-        self.durationMatrix = matrix.MatrixDisplay(matrixFrame, width, height, project,mainCanvasClickable=True)
+        self.durationMatrix = matrix.MatrixDisplay(matrixFrame, width, height, self.project,mainCanvasClickable=True)
         nb.add(frame, text="Durations")
         self.durationMatrix.draw(data=self.project.get_durations())
         #nb.bind("<<NotebookTabChanged>>",self.tab_changed)
@@ -442,6 +479,34 @@ class mainWindow(tkinter.Tk):
 #
 #
 ###############################################################################################
+
+    def key(self,event):
+        print("event is",event.widget)
+        val = str(event.char)
+        print("val is",val,type(val))
+        if val in ["1","I","i"]:
+            print("setting to in")
+            event.widget.set("In")
+            #return
+        if val in ["2","O","o"]:
+            event.widget.set("Out")
+        if val in ["3","B","b"]:
+            event.widget.set("Both")
+        row = event.widget.grid_info()
+        #print("info is",row)
+        currentWidgetIndex = row["row"] * 5
+        #print("current widget index is",currentWidgetIndex)
+        parent = self.nametowidget(event.widget.winfo_parent())
+        try:
+            newWidget = parent.winfo_children()[currentWidgetIndex + 4]
+        except IndexError as e:
+            print("error",e)
+            newWidget = parent.winfo_children()[10]
+        newWidget.focus_set()
+        #newWidget.config(background="red")
+        #print("new widget info",newWidget.grid_info())
+        return "break"
+
 
     def load_settings(self):
         try:
@@ -559,32 +624,34 @@ class mainWindow(tkinter.Tk):
 
 
     def duration_checkbox_clicked(self,*args):
-        frame = self.winfo_children()[2].winfo_children()[0]
-        print("CLICKED!!!!", frame.winfo_children()[9].var.get(),args)
-        if frame.winfo_children()[9].var.get():
-            frame.winfo_children()[10].config(state=tkinter.NORMAL)
-            frame.winfo_children()[11].config(state= tkinter.NORMAL)
-            frame.winfo_children()[12].var.set(0)
-        else:
-            frame.winfo_children()[10].config(state= tkinter.DISABLED)
-            frame.winfo_children()[11].config(state= tkinter.DISABLED)
-
-
-    def max_checkbox_clicked(self,*args):
-        frame = self.winfo_children()[2].winfo_children()[0]
-        print("CLICKED!!!!", frame.winfo_children()[9].var.get(),args)
-        if frame.winfo_children()[12].var.get():
+        frame = self.winfo_children()[2].winfo_children()[0].interior
+        print("CLICKED!!!!", frame.winfo_children()[13].var.get(),args)
+        if frame.winfo_children()[13].var.get():
             frame.winfo_children()[14].config(state=tkinter.NORMAL)
             frame.winfo_children()[15].config(state= tkinter.NORMAL)
-            frame.winfo_children()[9].var.set(0)
+            frame.winfo_children()[16].var.set(0)
         else:
             frame.winfo_children()[14].config(state= tkinter.DISABLED)
             frame.winfo_children()[15].config(state= tkinter.DISABLED)
 
 
+    def max_checkbox_clicked(self,*args):
+        frame = self.winfo_children()[2].winfo_children()[0].interior
+        print("CLICKED!!!!", frame.winfo_children()[13].var.get(),args)
+        if frame.winfo_children()[16].var.get():
+            frame.winfo_children()[17].config(state=tkinter.NORMAL)
+            frame.winfo_children()[19].config(state=tkinter.NORMAL)
+            frame.winfo_children()[18].config(state= tkinter.NORMAL)
+            frame.winfo_children()[13].var.set(0)
+        else:
+            frame.winfo_children()[17].config(state=tkinter.DISABLED)
+            frame.winfo_children()[18].config(state= tkinter.DISABLED)
+            frame.winfo_children()[19].config(state= tkinter.DISABLED)
+
+
     def add_filter(self,event):
         text = event.widget.get()
-        lb = self.winfo_children()[2].winfo_children()[0].winfo_children()[1]
+        lb = self.winfo_children()[2].winfo_children()[0].interior.winfo_children()[1]
         if text == "":
             return
         try:
@@ -623,22 +690,23 @@ class mainWindow(tkinter.Tk):
 
 
     def button_clicked(self,index):
-        frame = self.winfo_children()[2].winfo_children()[0]
-        lb = self.winfo_children()[2].winfo_children()[0].winfo_children()[1]
+        frame = self.winfo_children()[2].winfo_children()[0].interior
+        lb = frame.winfo_children()[1] ## i just attached the var to the list box for convenience.
+        filterBehaviour = lb.filterVar.get()
         durationCheck = None
         durationBehaviour = None
-        if frame.winfo_children()[9].var.get():
+        if frame.winfo_children()[13].var.get():
             durationCheck = "duration"
-            durationBehaviour = ["split", "discard"][frame.winfo_children()[9].radioVar.get()]
-        if frame.winfo_children()[12].var.get():
+            durationBehaviour = ["split", "discard"][frame.winfo_children()[13].radioVar.get()]
+        if frame.winfo_children()[16].var.get():
             durationCheck = "max"
-            durationBehaviour = ["split", "discard"][frame.winfo_children()[12].radioVar.get()]
-        maxVal = frame.winfo_children()[13].get()
+            durationBehaviour = ["split", "discard"][frame.winfo_children()[16].radioVar.get()]
+        maxVal = frame.winfo_children()[17].get()
         print(durationCheck,durationBehaviour,maxVal)
         selectedDisplay = self.winfo_children()[2].winfo_children()[1].winfo_children()[7].current()
         print("selectedDsiplay is",selectedDisplay)
         timeType = 2#frame.winfo_children()[17].var.get()
-        daysInSeparateSheets = frame.winfo_children()[17].var.get()
+        daysInSeparateSheets = True# frame.winfo_children()[17].var.get()
         filters = []
         if lb.get(0) == "ALL":
             filters = ["I-B*-O","(I-B-B*)-I","O-(B-B*-O)","I-B-B*!","^B-B*-O","^B-B-B*!"]
@@ -651,41 +719,65 @@ class mainWindow(tkinter.Tk):
         print("filters are",filters)
         if index == 0:
             lb.delete(0, tkinter.END)
-        if index >=1 and index < 6:
+        if index >=1 and index < 7:
             self.matrix.clear()
-            #self.matrix.update()
         if index == 1:
-            self.data = self.project.calculate_regex_matching(filters, durationCheck, durationBehaviour, maxVal)
-            print("result is", self.data)
-            self.matrix.draw(self.data[0],totals=True)
+            if filters == []:
+                messagebox.showinfo(message="No filters entered")
+                return
+            fun = self.project.calculate_regex_matching
+            args =(filters, durationCheck, durationBehaviour, maxVal,filterBehaviour,self.set_data)
+            self.startProgress("Processing Filtered Matching", fun,args)
         if index == 2:
-            self.data = self.project.calculate_nondirectional_cordon(durationCheck,durationBehaviour,maxVal)
-            print("result is",self.data)
-            self.matrix.draw(self.data[0],totals=True)
+            fun = self.project.calculate_directional_cordon
+            args = (durationCheck,durationBehaviour,maxVal,self.set_data)
+            self.startProgress("Processing In Out Matching", fun, args)
         if index == 3:
-            self.data = self.project.calculate_pairs(durationCheck, durationBehaviour, maxVal)
-            print("result is", self.data)
-            self.matrix.draw(self.data[0],totals=True)
+            fun = self.project.calculate_nondirectional_cordon
+            args = (durationCheck,durationBehaviour,maxVal,self.set_data)
+            self.startProgress("Processing Non-Dir Matching", fun, args)
         if index == 4:
-            self.data = self.project.calculate_fs_ls(durationCheck, durationBehaviour, maxVal)
-            print("result is", self.data)
-            self.matrix.draw(self.data[0],totals=True)
+            fun = self.project.calculate_pairs
+            args = (durationCheck, durationBehaviour, maxVal,self.set_data)
+            self.startProgress("Processing Pairs Matching", fun, args)
         if index == 5:
-            self.data = self.project.calculate_full_journeys(durationCheck, durationBehaviour, maxVal)
-            print("result is", self.data)
-            self.matrix.draw(self.data[0],totals=True)
+            fun = self.project.calculate_fs_ls
+            args = (durationCheck, durationBehaviour, maxVal,self.set_data)
+            self.startProgress("Processing Fs-Ls Matching", fun, args)
         if index == 6:
+            fun = self.project.calculate_full_journeys
+            args = (durationCheck, durationBehaviour, maxVal,self.set_data)
+            self.startProgress("Processing Full Journeys", fun, args)
+        if index == 7:
             self.project.save_matched_data(timeType,daysInSeparateSheets)
             messagebox.showinfo(message="Output complete")
-        if index == 7:
-            print("folder is",self.project.folder)
-            if os.path.isdir(self.project.folder):
-                p = os.path.normpath(self.project.folder)
-                subprocess.Popen('explorer "{0}"'.format(p))
-            else:
-                messagebox.showinfo(message="Project folder doesnt exist")
         if index == 8:
+            print("folder is",self.project.folder)
+            self.open_folder(self.project.folder)
+        if index == 9:
             self.display_project(self.project.projectId)
+
+
+    def open_folder_from_edit_screen(self):
+        if self.projectId is None:
+            messagebox.showinfo(message="No project folder selected")
+            return
+        folder = myDB.get_folder(self.projectId)
+        self.open_folder(folder)
+
+
+    def open_folder(self,folder):
+        if os.path.isdir(folder):
+            p = os.path.normpath(folder)
+            subprocess.Popen('explorer "{0}"'.format(p))
+        else:
+            messagebox.showinfo(message="Project folder doesnt exist")
+
+
+    def set_data(self,data):
+        self.data = data
+        self.matrix.draw(self.data[0], totals=True)
+        self.stopProgress()
 
 
     def table_clicked(self,col,iid):
@@ -715,22 +807,19 @@ class mainWindow(tkinter.Tk):
                 messagebox.showinfo(message="no movements, or all movement details are blank")
                 self.display_project(iid)
                 return
-
-            if not proj.load_plates():
-                return
-            self.spawn_matching_results_screen(proj)
-        #elif col == 3:
-         #   print("loading project", iid)
-          #  proj = ANPRproject.ANPRproject()
-           # proj.load_project(iid)
-            #self.project = proj
-            #self.spawn_duration_matrix_screen(proj)
-            #self.durationMatrix.draw(data = self.project.get_durations())
+            self.project = proj
+            self.startProgress("",proj.load_plates,(self.plates_loaded,self.change_progress_message))
+            #threading.Thread(target=proj.load_plates,args=).start()
         else:
             proj = ANPRproject.ANPRproject()
             proj.load_project(iid)
             proj.export_OVTemplate()
             messagebox.showinfo(message="Export Complete")
+
+
+    def plates_loaded(self):
+        self.stopProgress()
+        self.spawn_matching_results_screen()
 
 
     def set_up_movements_frame(self,numCams):
@@ -742,7 +831,9 @@ class mainWindow(tkinter.Tk):
         for child in movementFrame.winfo_children():
             child.destroy()
         tkinter.Label(movementFrame, text="Movements", bg=self.tracsisBlue, fg="white",font=headerFont).grid(row=0, column=0,columnspan=5, sticky="nsew")
-        frame = VerticalScrolledFrame(movementFrame,bg="beige")
+        height = self.winfo_screenheight()-200
+
+        frame = VerticalScrolledFrame(movementFrame,bg="beige",height=height)
         frame.grid(row=1,column=0)
         tkinter.Label(frame.interior, text="Site", bg="white",fg=self.tracsisBlue,relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=1, column=0, sticky="nsew")
         tkinter.Label(frame.interior, text="Cam", bg="white",fg=self.tracsisBlue,relief=tkinter.GROOVE,borderwidth=2, font=f).grid(row=1, column=1, sticky="nsew")
@@ -760,18 +851,19 @@ class mainWindow(tkinter.Tk):
             box["values"] = ("In", "Out", "Both")
             box.grid(row=2+i, column=4, pady=2, padx=10, sticky="w")
             box.unbind_class("TCombobox", "<MouseWheel>")
+            box.bind("<Key>", self.key)
 
 
     def display_project(self,projectID):
+        self.spawn_edit_screen() ### sets self.projectId to None
         self.projectId = projectID
-        self.spawn_edit_screen()
         outerFrame = self.winfo_children()[2]
         print("no of children", len(outerFrame.winfo_children()))
-        frame = outerFrame.winfo_children()[0]
+        frame = outerFrame.winfo_children()[0].winfo_children()[1].interior
         project = myDB.get_project_details(self.projectId)
         self.numCameras = project[3]
         for index,i in enumerate(range(22,43)):
-            print("looking at",type(frame.winfo_children()[i]))
+            print("looking at",type(frame.winfo_children()[i]),project[index])
             if type(frame.winfo_children()[i]) == tkinter.Checkbutton:
                 frame.winfo_children()[i].var.set(project[index])
             elif type(frame.winfo_children()[i]) == ttk.Combobox:
@@ -779,6 +871,11 @@ class mainWindow(tkinter.Tk):
             else:
                 frame.winfo_children()[i].delete(0,"end")
                 frame.winfo_children()[i].insert(0,str(project[index]))
+        loadedPlates =myDB.get_uploaded_file(self.projectId)
+        if loadedPlates == "" or loadedPlates is None:
+            frame.winfo_children()[43].config(text="None")
+        else:
+            frame.winfo_children()[43].config(text=loadedPlates.split("/")[-1])
         ###
         ### display movements
         ###
@@ -788,7 +885,7 @@ class mainWindow(tkinter.Tk):
         for movement in movements:
             row = movement[2]
             startIndex = (row*5)
-            print(movement,"start index is",startIndex)
+            #print(movement,"start index is",startIndex)
             #frame.interior.winfo_children()[startIndex].config(text=str(movement[0]))
             frame.interior.winfo_children()[startIndex + 1].insert(0,str(movement[1]))
             #frame.interior.winfo_children()[startIndex + 2].config(text=str(movement[2]))
@@ -800,7 +897,7 @@ class mainWindow(tkinter.Tk):
     def save_project(self):
         outerFrame = self.winfo_children()[2]
         print("no of children", len(outerFrame.winfo_children()))
-        frame = outerFrame.winfo_children()[0]
+        frame = outerFrame.winfo_children()[0].winfo_children()[1].interior
         data = []
         for i in range(22,43):
             if type(frame.winfo_children()[i]) == tkinter.Checkbutton:
@@ -826,7 +923,7 @@ class mainWindow(tkinter.Tk):
         ### validate all the dates and times
         ###
 
-        for i in range(27,41,5):
+        for i in range(27,42,5):
             d = self.validate_date(frame.winfo_children()[i].get())
             if not d:
                 return
@@ -871,7 +968,6 @@ class mainWindow(tkinter.Tk):
             return
 
 
-
     def time_focus_out(self,event):
         if not self.validate_time(event.widget.get()):
             event.widget.delete(0, 'end')
@@ -884,6 +980,7 @@ class mainWindow(tkinter.Tk):
 
     def validate_date(self, value):
         #value = event.widget.get()
+        print("checking",value)
         if value == "":
             return True
         try:
@@ -947,6 +1044,48 @@ class mainWindow(tkinter.Tk):
                 self.tree.item(self.last_focus, tags=[])
             self.tree.item(_iid, tags=['focus'])
             self.last_focus = _iid
+
+
+    def startProgress(self,msg,fun,args):
+        threading.Thread(target=fun,args=args).start()
+        self.progressWin = tkinter.Toplevel(self,width = 200,height = 200)
+        print("x,y is",self.winfo_rootx(),self.winfo_rooty())
+        x = int(self.winfo_screenwidth()/2 - 100) + self.winfo_rootx()
+        y = int(self.winfo_screenheight() / 2 -300) + self.winfo_rooty()
+        self.progressWin.attributes("-topmost",True)
+        tkinter.Label(self.progressWin,text = msg).grid(row=0,column = 0,padx = 20,pady= 20)
+        self.progress = ttk.Progressbar(self.progressWin, orient="horizontal", length=200, mode="indeterminate")
+        self.progress.grid(row=1,column = 0,padx = 20,pady= 20)
+        self.progressWin.update()
+        self.progress.start(10)
+        w = self.progressWin.winfo_reqwidth()
+        h = self.progressWin.winfo_reqheight()
+        self.progressWin.geometry(str(w) + "x" + str(h) + "+" + str(x) + "+" + str(y))
+        self.progressWin.lift()
+        self.processing = True
+
+
+    def step_progress(self):
+        while self.processing == True:
+            self.progress.step()
+            self.after(100,self.step_progress)
+
+
+    def stopProgress(self):
+        #print("in self.stop progress")
+        self.processing = False
+        if self.progress is None:
+            pass
+        else:
+            self.progress.stop()
+            self.progress =None
+        self.progressWin.destroy()
+        self.progressWin = None
+
+
+    def change_progress_message(self,msg):
+        if not self.progressWin is None:
+            self.progressWin.winfo_children()[0].config(text=msg)
 
 
 def validate_filter(filter):

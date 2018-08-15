@@ -149,7 +149,7 @@ def save_project(data):
     print(len(job))
     try:
         cur.execute("INSERT INTO project (projectNumber,projectName,projectDate,numCameras,interval,start1,end1,"
-                    "from1,to1,split1,start2,end2,from2,to2,split2,start3,end3,from3,end3,split3,classes,beingProcessed,folder,uploadedData,addedDate) "
+                    "from1,to1,split1,start2,end2,from2,to2,split2,start3,end3,from3,to3,split3,classes,beingProcessed,folder,uploadedData,addedDate) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",tuple(job)
                     )
         jobID = cur.lastrowid

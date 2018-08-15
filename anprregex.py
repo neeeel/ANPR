@@ -128,9 +128,6 @@ def match2(data,regstring):
     matches = [m for m in matches if len(m) > 1]
     remainders  = []
     segmentStart = 0
-    start = 0
-    end = len(data)
-    #print("journey her is",data)
     for start, end in [[data.index(m[0]), data.index(m[-1])] for m in matches]:
         #print(segmentStart,start,end)
         remainders.append(data[segmentStart:start])

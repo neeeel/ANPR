@@ -12,8 +12,8 @@ class MatrixDisplay(tkinter.Frame):
         self.maxHeight = maxHeight
         self.parentFrame = parentFrame
         self._entry_popup = None
-        width = parentFrame.winfo_width()
-        height = parentFrame.winfo_height()
+        width = self.maxWidth#parentFrame.winfo_width()
+        height =self.maxHeight# parentFrame.winfo_height()
         self.vbar = tkinter.Scrollbar(parentFrame, orient=tkinter.VERTICAL)
         self.hbar = tkinter.Scrollbar(parentFrame, orient=tkinter.HORIZONTAL)
         self.vbar.bind("<Button-1>", self.scroll_matrix_screen)
